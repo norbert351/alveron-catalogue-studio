@@ -4,6 +4,7 @@ import { getPool } from '@/lib/db';
 import { getPrivateStorage } from '@/lib/storage';
 import { hasStudioAccess } from '@/lib/security-rules';
 import { z } from 'zod';
+import { env } from '@/lib/config';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,12 +16,14 @@ export async function GET(_request: Request, context: ImageRouteContext) {
   if (!hasStudioAccess(await getCurrentUser())) return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
   const { id, imageId } = await context.params;
   if (!uuid.safeParse(id).success || !uuid.safeParse(imageId).success) return NextResponse.json({ error: 'Image not found.' }, { status: 404 });
-  const result = await getPool().query('SELECT object_key, media_type FROM product_images WHERE id = $1 AND product_id = $2', [imageId, id]);
+  const result = await getPool().query('SELECT object_key, storage_provider, media_type, byte_size, sha256 FROM product_images WHERE id = $1 AND product_id = $2', [imageId, id]);
   const image = result.rows[0];
   if (!image) return NextResponse.json({ error: 'Image not found.' }, { status: 404 });
   try {
-    const bytes = await getPrivateStorage().get(image.object_key);
-    return new Response(new Uint8Array(bytes), { headers: { 'Content-Type': image.media_type, 'Content-Length': String(bytes.length), 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' } });
+    const bytes = await getPrivateStorage(image.storage_provider ?? env.STORAGE_PROVIDER).get(image.object_key);
+    const checksum = createHash('sha256').update(bytes).digest('hex');
+    if (bytes.length !== Number(image.byte_size) || checksum !== image.sha256) return NextResponse.json({ error: 'Original image failed its integrity check. Contact the studio owner before using this file.' }, { status: 503, headers: { 'Cache-Control': 'no-store' } });
+    return new Response(new Uint8Array(bytes), { headers: { 'Content-Type': image.media_type, 'Content-Length': String(bytes.length), 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff', 'X-Original-SHA256': checksum } });
   } catch {
     return NextResponse.json({ error: 'Original image is unavailable.' }, { status: 503 });
   }
@@ -47,3 +50,4 @@ export async function POST(request: Request, context: ImageRouteContext) {
     return NextResponse.json({ error: 'Image review could not be saved.' }, { status: 503 });
   }
 }
+import { createHash } from 'node:crypto';

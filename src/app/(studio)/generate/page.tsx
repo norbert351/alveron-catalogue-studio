@@ -2,9 +2,14 @@ import Link from 'next/link';
 import { ArrowRight, LockKeyhole, ShieldAlert, Sparkles } from 'lucide-react';
 import { PageHeading } from '@/components/page-heading';
 import { getImageGenerationProvider } from '@/lib/generation/provider';
+import { getPool } from '@/lib/db';
 
-export default function GeneratorPage() {
+export const dynamic = 'force-dynamic';
+
+export default async function GeneratorPage() {
   const provider = getImageGenerationProvider();
+  const jobs = await getPool().query(`SELECT j.id,j.status,j.provider,j.model,j.error_code,j.error_message,j.attempts,j.created_at,c.id AS catalogue_id,c.title
+    FROM generation_jobs j JOIN catalogues c ON c.id=j.catalogue_id ORDER BY j.created_at DESC LIMIT 50`).then((result) => result.rows).catch(() => null);
   return <>
     <PageHeading eyebrow="Studio workflow · 03" title="Catalogue generator" description="A server-side provider adapter is reserved here. Generation stays unavailable until a real provider is implemented and configured." />
     <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
@@ -16,5 +21,6 @@ export default function GeneratorPage() {
       </section>
       <aside className="h-fit border border-[#e3ded6] bg-white p-5"><ShieldAlert size={16} className="text-[#b6222b]" /><h2 className="display-serif mt-4 text-[22px]">Fidelity comes first.</h2><p className="mt-3 text-[10px] leading-[1.8] text-[#77736d]">Image models can alter colour, pattern, logos, fabric appearance or garment construction. Generated mannequin imagery is never treated as verified product photography.</p><Link href="/outfits" className="mt-5 flex items-center justify-between border-t border-[#eee9e1] pt-4 text-[10px] font-medium">Review outfit brief <ArrowRight size={13} className="text-[#b6222b]" /></Link></aside>
     </div>
+    <section className="mt-7 border border-[#e3ded6] bg-white p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-[#b6222b]">Persistent job history</p><h2 className="display-serif mt-2 text-[22px]">Generation attempts</h2></div><span className="border border-[#e2ddd5] px-2 py-1 text-[8px] uppercase text-[#77736d]">Provider · {provider?.id ?? 'none'}</span></div>{jobs === null ? <p role="alert" className="mt-4 text-[10px] text-[#962a2e]">Job history unavailable. Check PostgreSQL and apply migrations.</p> : jobs.length === 0 ? <p className="mt-4 border border-dashed border-[#ded8cf] p-4 text-[10px] text-[#938e86]">No generation jobs have been requested. Attempts are stored in PostgreSQL; a server restart will not erase them.</p> : <div className="mt-4 divide-y divide-[#eee9e1]">{jobs.map((job) => <div key={job.id} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-[10px] font-medium">{job.title}</p><p className="mt-1 font-mono text-[8px] text-[#938e86]">{job.id} · {job.provider}{job.model ? ` / ${job.model}` : ''} · {job.attempts} attempt(s)</p>{job.error_message && <p className="mt-1 text-[9px] text-[#9a6630]">{job.error_message}</p>}</div><span className="w-fit border border-[#e2ddd5] px-2 py-1 text-[8px] uppercase text-[#77736d]">{job.status}{job.error_code ? ` · ${job.error_code}` : ''}</span></div>)}</div>}</section>
   </>;
 }

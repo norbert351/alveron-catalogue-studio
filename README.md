@@ -1,108 +1,164 @@
 # Alveron Catalogue Studio
 
-A private, standalone product-catalogue studio for Alveron Fashion. It is built from the actual product photographs uploaded by the studio owner. The initial release includes the private studio shell, owner sign-in, Product Library, immutable original-image storage, per-image review markers, an outfit brief that references exact reviewed products and image views, and a source-only editorial composition preview that uses those original photos unchanged.
+Private, standalone Alveron Fashion catalogue studio. The application is built around original owner-uploaded product photographs, explicit outfit selection, and human approval. It does not connect to or publish to the Alveron storefront.
 
-**Image generation, source-versus-output approval, catalogue export, and storefront publishing are not implemented.** The generator is visibly disabled and does not return demo art. Nothing is published automatically.
+## Current capability and boundary
 
-## Stack and pinned versions
+The application provides authenticated owner/editor access, product and image management, review of every accessible source image, outfit drafts, source-photo catalogue composition, persistent generation request records, source/output review, rejection/correction, checksum-bound approval, and authorized PNG/JPEG/PDF export. Original photos and derived assets are stored privately and are never overwritten.
 
-The lockfile records exact resolved dependency versions. The initial direct pins are:
+**A real image-generation provider is not connected.** Generation is disabled and no garment photos are sent to an external model. A provider adapter interface and persistent blocked-job record are present, but enabling provider egress requires selecting and authorizing a specific provider. The available alternative is an explicitly labeled source-photo composition, which uses the actual uploaded images and does not claim to show a generated mannequin. Every output still requires human approval.
 
-| Area | Version |
-|---|---|
+There is no product hard-delete operation. Products are archived or restored; original photos and history remain retained. No export is allowed without current approval for the exact output checksum and source inventory revision.
+
+## Stack and versions
+
+The lockfile pins the full resolved dependency graph. Direct versions include:
+
+| Component | Version |
+|---|---:|
 | Next.js App Router | 16.4.2 |
 | React / React DOM | 19.3.1 |
 | TypeScript | 5.9.3 |
-| Tailwind CSS / PostCSS integration | 4.3.3 |
-| Node PostgreSQL driver | pg 8.23.1 |
-| PostgreSQL local container | 18.6 Alpine |
+| Tailwind CSS / PostCSS | 4.3.3 |
+| PostgreSQL | 18.6 Alpine container |
+| `pg` | 8.23.1 |
 | Zod | 4.6.7 |
-| S3 client | AWS SDK client-s3 3.1153.0 |
-| Image metadata/decode validation | Sharp 0.35.5 |
-| File signature detection | file-type 22.2.0 |
-| Password hashing | bcryptjs 3.0.3 |
-| Icons | lucide-react 1.59.0 |
-| Lint | ESLint 10.13.0, @eslint/js 10.0.1, typescript-eslint 8.72.0, eslint-plugin-react-hooks 7.1.1 |
-| Test runner | Node test runner with tsx 4.23.15 |
+| AWS SDK S3 client | 3.1153.0 |
+| Sharp | 0.35.5 |
+| `file-type` | 22.2.0 |
+| `bcryptjs` | 3.0.3 |
+| `server-only` | 0.0.1 |
+| ESLint | 10.13.0 |
+| Node test runner / tsx | Node 22.23.1 / 4.23.15 |
 
-Use Node.js 22.9 or newer (the project was scaffolded with Node 22.23.1), npm, and Docker Compose. Next.js 16 itself documents a Node.js 20.9 minimum; the higher project minimum is for Node's `--env-file-if-exists` setup scripts.
+Use Node.js 22.9 or later, npm, and Docker Compose. The project is private; no production credentials are included.
 
-## Local development
+## Local setup
 
-1. Install packages:
+```bash
+npm ci
+cp .env.example .env.local
+```
 
-   ```bash
-   npm ci
-   ```
+Replace local placeholders. Create a unique `SESSION_SECRET` (at least 32 characters), `AUTH_BOOTSTRAP_EMAIL`, `AUTH_BOOTSTRAP_NAME`, and owner password (at least 16 characters). Use the same local PostgreSQL password in `POSTGRES_PASSWORD` and `DATABASE_URL`.
 
-2. Create a local environment file and replace the placeholders. Use unique local secrets; the template password is intentionally rejected by the bootstrap script.
+```bash
+openssl rand -hex 32
+docker compose --env-file .env.local up -d postgres
+npm run db:migrate
+npm run db:bootstrap
+npm run dev
+```
 
-   ```bash
-   cp .env.example .env.local
-   openssl rand -hex 24
-   ```
+Open `http://localhost:3000`. Bootstrap only creates the first owner and refuses to create a default or additional account. There is no public signup route. Apply schema updates with `npm run db:migrate`; migrations are additive and recorded in `schema_migrations`. Do not use database reset commands on an existing studio.
 
-   Put the generated value into `SESSION_SECRET`. Set `AUTH_BOOTSTRAP_EMAIL`, `AUTH_BOOTSTRAP_NAME`, and a unique `AUTH_BOOTSTRAP_PASSWORD` of at least 16 characters. Set the same local database password in `POSTGRES_PASSWORD` and in the password portion of `DATABASE_URL`.
-
-3. Start PostgreSQL on loopback only (host port 55432 avoids common local PostgreSQL ports):
-
-   ```bash
-   docker compose --env-file .env.local up -d postgres
-   ```
-
-4. Create/update the schema and create the first owner account:
-
-   ```bash
-   npm run db:migrate
-   npm run db:bootstrap
-   ```
-
-   Owner bootstrap is one-time and refuses to run if an account already exists.
-
-5. Start the studio:
-
-   ```bash
-   npm run dev
-   ```
-
-   Visit `http://localhost:3000` and sign in with the configured owner account. Stop PostgreSQL with `docker compose down`; keep its volume with `docker compose down` and delete data only with an explicit `docker compose down -v`.
-
-Local original photos are stored beneath `.local-data/private/`, outside `public/`, with restrictive filesystem permissions. They are excluded from Git. Local storage is refused in production.
-
-## Private storage configuration
-
-Local mode needs no storage service or paid account. For deployment, set `STORAGE_PROVIDER=s3`, `S3_BUCKET`, and `S3_REGION`; set `S3_ENDPOINT` for an S3-compatible endpoint and `S3_FORCE_PATH_STYLE=true` only when that endpoint requires it. Credentials may use the server's IAM/workload identity, or the server-only `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` variables. Use a private bucket with public access blocked. The application does not set public ACLs or generate public URLs.
-
-Original images are limited to JPEG, PNG and WebP, 15 MB each, up to five per product. The server checks file signatures and image dimensions, stores the uploaded bytes unchanged under a unique key, records a SHA-256 checksum, and serves photos through an authenticated, no-store route. Product image rows cannot be edited through the UI/API; replacement workflows are intentionally absent.
+The Compose database uses a named `catalogue-postgres` volume at PostgreSQL's data directory and binds only to `127.0.0.1:55432`. `docker compose down` retains database data; `docker compose down -v` deletes the volume and should only be used for a disposable test environment.
 
 ## Routes
 
-- `/dashboard` — inventory and review overview
-- `/products` — add products, upload and inspect every image, mark views reviewed
-- `/outfits` — explicitly select reviewed products, source views, item roles, one style, and one occasion
-- `/generate` — provider readiness; generation is disabled until a real adapter is built and configured
-- `/review` — outfit brief with original source views, checksums and an unchanged-photo composition preview; output approval is disabled
-- `/approved` — approval archive (empty until approval/export exists)
-- `/settings` — non-secret database, storage, session and generation status
-- `/login` — private owner sign-in; no public account creation
-- `/api/status` — non-secret local readiness status
+| Route | Purpose |
+|---|---|
+| `/dashboard` | Product, source-image, draft and review counts |
+| `/products` | Product metadata, upload/version views, private previews, review, search/filter, archive/restore |
+| `/outfits` | Exact products and source-image selection, roles, one style/occasion, saved draft editing |
+| `/generate` | Provider status and persisted generation-job history; external generation disabled |
+| `/review` | Source/output comparison, original-photo composition, reject/correction/approve controls |
+| `/approved` | Approved output versions and PNG/JPEG/PDF downloads |
+| `/settings` | Redacted connection status, health checks, limits, queue and upload recovery counts |
+| `/login` | Private owner/editor sign-in |
 
-## Data integrity and security
+All studio routes are inside the authenticated layout. Product and output images are served from authenticated server routes with `private, no-store` headers; storage credentials and permanent public object URLs are never sent to the browser.
 
-- All studio pages and private image routes require a database-backed session. Sessions use random HttpOnly, SameSite=Strict cookies and HMAC-hashed tokens; production cookies are Secure.
-- State-changing browser requests require a same-origin `Origin` header. Login attempts are throttled per process.
-- SQL migrations define users, sessions, products, original images, image reviews, catalogues, source-product links, jobs, generated-asset metadata, approvals and audit events.
-- Every catalogue item stores a product ID and an image ID constrained to that same product. The API blocks outfit creation while any accessible product image remains unreviewed.
-- An image model is not allowed to stand in for the original garment. The provider adapter returns “unconfigured” and cannot generate until implementation work connects a real provider.
-- Export and publishing APIs do not exist in this stage.
+## Product uploads and retention
 
-## Checks
+Accepted formats are JPEG, PNG, and WebP. Each file is limited to 15 MB, and each upload request accepts up to five images (maximum request about 75 MB). The server enforces multipart size, file signature, image decoding, pixel bounds, MIME type, SHA-256, and dimensions. Original bytes are written unchanged to immutable, random-ID storage keys. The database stores image ID, product ID, key, MIME type, dimensions, size, checksum, view label, upload time, storage provider, and optional superseded-image link.
+
+Supported views are front, back, side, close-up, detail, and colour/design. Replacing a view adds a new original record and marks the earlier record as a previous version; it never edits the prior object. Every accessible image version remains available and must be reviewed. New uploads and material product changes advance a persistent inventory revision, invalidate prior approvals, and require a fresh output review.
+
+Product details and tags are owner-entered. The UI labels them accordingly; the studio does not infer hidden material, colour, fit, or construction information. Unverified fields stay blank. Unavailable and archived products cannot be newly selected. Archiving is reversible and does not delete the product or its images.
+
+## Storage
+
+### Local development
+
+`STORAGE_PROVIDER=local` writes files under `LOCAL_STORAGE_DIR`, default `.local-data/private/`. This directory is outside `public/`, excluded from Git, and independent of `.next` build output. Do not store it in `/tmp` for normal development. Back up this folder together with PostgreSQL.
+
+### S3-compatible private storage
+
+For a private S3-compatible bucket set server-only `STORAGE_PROVIDER=s3`, `S3_BUCKET`, and `S3_REGION`; set `S3_ENDPOINT` for compatible endpoints and `S3_FORCE_PATH_STYLE=true` only if required. Set `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` on the server, or use the server's workload/IAM credentials. Keep bucket public access blocked. Uploads use immutable conditional writes; images are read through authenticated routes. The settings health check issues a bucket health request without displaying credentials.
+
+The application does not silently fail over between local and S3 storage. A configured backend outage is shown as unavailable; the original row and checksum remain intact.
+
+### Copy-and-verify storage migration
+
+The migration inventories database-referenced originals, outputs, and exports. It copies without deleting the source, verifies byte size and SHA-256, updates a row's provider reference only after verification, resumes when an identical destination already exists, and fails on destination conflicts instead of overwriting them. A timestamped JSON report is written beneath `.local-data/migration-reports/` by default.
+
+For local to S3, first keep `STORAGE_PROVIDER=local` so legacy rows without a provider marker resolve to their current backend, configure S3 settings, then run:
 
 ```bash
+npm run storage:migrate -- --from local --to s3
+```
+
+Inspect the report and failed rows. After every source record is verified and migrated, set `STORAGE_PROVIDER=s3`. Source files are retained; remove them only under a separately approved retention process. For production, keep the configured backend private and test restore before retiring any source storage.
+
+## Outfit, generation, review and export
+
+Outfit drafts store exact product/image IDs and roles, one style, one occasion, and the inventory revision. A top and bottom (or an uploaded set) are required. Mixed style is recorded only when the owner explicitly checks the request. Server endpoints recheck current availability, review status, exact product-image relationships, and inventory revision.
+
+`POST /api/catalogues/{id}/generate` records an idempotent persistent job. Because no specifically selected and authorized provider is configured, the job is stored as blocked with `provider_not_configured`; it does not send product photographs anywhere. Job state, input snapshot, retry/attempt fields, failure details, and timestamps are in PostgreSQL.
+
+The source-photo composer creates a derived 1080 × 1350 editorial layout exclusively from exact selected uploads. It is marked `original-photo-composition`, not AI output. Output files are separately stored with source snapshots and SHA-256. The review page shows the output beside source images and labels the fallback type.
+
+Approval records bind reviewer, output ID, output checksum, and catalogue revision. A source change or new output invalidates older approval rows without deleting audit history. Rejection requires a reason; correction returns the draft to an editable state. The export API rechecks approval in PostgreSQL and private storage, and records format, dimensions, requesting user, approval, output checksum, export checksum, and timestamp. PNG, JPEG, and one-page PDF use 1080 × 1350 by default. Export does not publish to a storefront or social account.
+
+## Migrations, tests and checks
+
+```bash
+npm run db:migrate
 npm run lint
 npm run typecheck
 npm test
 npm run build
 ```
 
-The unit tests cover product metadata uncertainty, category validation, one-style/one-occasion constraints, explicit mixed-style requests, unique product references, private-access decisions, same-origin writes, and storage-path traversal rejection.
+`npm test` covers image validation, write-once originals, authorization rules, mixed-style input, approval checksum/revision checks, PDF structure, and the source-photo renderer. `npm run test:e2e` starts a real Next.js development server on port 3100 and exercises owner auth, routes, multi-image upload, idempotency, source checksum and review, exact outfit references, blocked generation job persistence, source-photo composition, rejection/correction/approval, approved PNG/JPEG/PDF exports, missing-object recovery response, and a real app-process restart. **Run it only with an isolated disposable database and storage directory.** The test requires a bootstrapped test owner. The test itself retains data; remove only its disposable resources afterward.
+
+```bash
+npm run build
+ALVERON_TEST_PORT=3100 npm run test:e2e
+npm audit --omit=dev
+```
+
+The E2E test performs a real Next.js process restart and verifies the same source-image bytes and DB-backed session afterward. It does not call a real image-generation service. S3 behavior must be verified against the operator's own S3-compatible endpoint and permissions; local checks do not claim that integration.
+
+## Backup and restore
+
+Back up PostgreSQL **and** the local original/generated/export storage directory. A database-only backup cannot restore product bytes; a file-only backup cannot restore product/image relationships, approvals, or export records. For S3, use provider-side private bucket versioning/backup policy and separately back up PostgreSQL.
+
+Example custom-format PostgreSQL backup:
+
+```bash
+pg_dump --format=custom --file=alveron-catalogue.dump "$DATABASE_URL"
+tar -czf alveron-private-storage.tar.gz .local-data/private
+```
+
+Restore into a newly provisioned empty database and a separate local storage directory before switching the application:
+
+```bash
+pg_restore --no-owner --dbname="$RESTORE_DATABASE_URL" alveron-catalogue.dump
+mkdir -p "$RESTORE_STORAGE_DIR"
+tar -xzf alveron-private-storage.tar.gz -C "$RESTORE_ROOT"
+```
+
+Set `LOCAL_STORAGE_DIR` to the restored directory, run migrations, then validate `/api/settings/health`, product/image counts, and sampled SHA-256 values before allowing studio use. Do not restore over a live database or delete the original backup before verification.
+
+## Security and operating limits
+
+- Sessions are stored in PostgreSQL with hashed tokens; cookies are HttpOnly, SameSite=Strict, and Secure in production. Session lifetime is 12 hours.
+- Mutating browser requests require a same-origin `Origin`. Product, image, catalogue, approval, and export handlers check the authenticated studio role.
+- Login, upload, generation-request, and export operations have rate limits. Files have strict format, size, pixel, and path validation.
+- Upload failures retain a failed idempotency record and planned object keys for recovery inspection. Derived-output and export writes have recovery records until their database rows commit.
+- Original images are never deleted by normal application actions. There is no automated retention purge or physical delete endpoint.
+- No database image blobs, mock provider images, public object URLs, default owner passwords, automatic export, or publishing integrations are used.
+
+Before production use, configure private S3-compatible storage, secrets/session management, operational PostgreSQL backups, an authorized provider and its image-egress policy if AI generation is desired, and verify the complete deploy/restore procedure in a non-production environment. This project has not been deployed or declared production-ready.

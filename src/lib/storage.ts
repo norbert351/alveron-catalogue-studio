@@ -1,12 +1,16 @@
 import 'server-only';
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, HeadBucketCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { env } from './config';
 import { readPrivateFile, removePrivateFile, storeImmutableFile } from './storage-files';
+import { mkdir, stat } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
 
 export interface PrivateStorage {
   put(key: string, bytes: Buffer, contentType: string): Promise<void>;
   get(key: string): Promise<Buffer>;
   remove(key: string): Promise<void>;
+  head(key: string): Promise<{ byteSize: number; sha256?: string }>;
+  health(): Promise<void>;
 }
 
 class LocalPrivateStorage implements PrivateStorage {
@@ -21,6 +25,21 @@ class LocalPrivateStorage implements PrivateStorage {
   }
 
   async remove(key: string): Promise<void> {
+    await removePrivateFile(this.root, key);
+  }
+
+  async head(key: string) {
+    const file = await readPrivateFile(this.root, key);
+    const metadata = await stat(`${this.root}/${key}`);
+    return { byteSize: metadata.size, sha256: createHash('sha256').update(file).digest('hex') };
+  }
+
+  async health(): Promise<void> {
+    await mkdir(this.root, { recursive: true, mode: 0o700 });
+    await stat(this.root);
+    const key = `healthchecks/${randomUUID()}.png`;
+    const probe = Buffer.from('Alveron private storage health check');
+    await storeImmutableFile(this.root, key, probe);
     await removePrivateFile(this.root, key);
   }
 }
@@ -43,7 +62,8 @@ class S3PrivateStorage implements PrivateStorage {
   }
 
   async put(key: string, bytes: Buffer, contentType: string): Promise<void> {
-    await this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: bytes, ContentType: contentType }));
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    await this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: bytes, ContentType: contentType, Metadata: { sha256 }, IfNoneMatch: '*' }));
   }
 
   async get(key: string): Promise<Buffer> {
@@ -55,11 +75,26 @@ class S3PrivateStorage implements PrivateStorage {
   async remove(key: string): Promise<void> {
     await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
   }
+
+  async head(key: string) {
+    const result = await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key, ChecksumMode: 'ENABLED' }));
+    return { byteSize: Number(result.ContentLength ?? 0), sha256: result.Metadata?.sha256 };
+  }
+
+  async health(): Promise<void> {
+    await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
+  }
 }
 
-let storage: PrivateStorage | undefined;
-export function getPrivateStorage(): PrivateStorage {
-  if (env.NODE_ENV === 'production' && env.STORAGE_PROVIDER === 'local') throw new Error('Local filesystem storage is development-only. Configure a private S3 bucket before production.');
-  storage ??= env.STORAGE_PROVIDER === 's3' ? new S3PrivateStorage() : new LocalPrivateStorage();
+const instances = new Map<string, PrivateStorage>();
+export function getPrivateStorage(provider: 'local' | 's3' = env.STORAGE_PROVIDER, allowLocalMigration = false): PrivateStorage {
+  if (env.NODE_ENV === 'production' && provider === 'local' && !allowLocalMigration) throw new Error('Local filesystem storage is development-only. Configure a private S3 bucket before production.');
+  let storage = instances.get(provider);
+  if (!storage) {
+    storage = provider === 's3' ? new S3PrivateStorage() : new LocalPrivateStorage();
+    instances.set(provider, storage);
+  }
   return storage;
 }
+
+export function configuredStorageProvider(): 'local' | 's3' { return env.STORAGE_PROVIDER; }

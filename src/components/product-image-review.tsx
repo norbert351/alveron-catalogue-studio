@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Image from 'next/image';
 import { Check, LoaderCircle } from 'lucide-react';
 
-export function ProductImageReview({ productId, imageId, width, height, label, initialReviewed }: { productId: string; imageId: string; width: number; height: number; label: string; initialReviewed: boolean }) {
+export function ProductImageReview({ productId, imageId, width, height, label, initialReviewed, filename, mediaType, byteSize, sha256, createdAt, current }: { productId: string; imageId: string; width: number; height: number; label: string; initialReviewed: boolean; filename: string; mediaType: string; byteSize: number; sha256: string; createdAt: string; current: boolean }) {
   const [reviewed, setReviewed] = useState(initialReviewed);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -13,7 +13,8 @@ export function ProductImageReview({ productId, imageId, width, height, label, i
       <Image unoptimized fill sizes="(max-width: 768px) 50vw, 220px" src={`/api/products/${productId}/images/${imageId}`} alt={`${label} · original product photograph`} className="object-contain" />
       <span className="absolute left-2 top-2 bg-white/90 px-2 py-1 text-[8px] uppercase tracking-[0.12em] text-[#57524c]">Original</span>
     </div>
-    <div className="p-3"><div className="flex items-center justify-between gap-2"><span className="text-[10px] font-medium">{label}</span><span className="text-[8px] text-[#938e86]">{width} × {height}</span></div>
+    <div className="p-3"><div className="flex items-center justify-between gap-2"><span className="text-[10px] font-medium">{label}{!current && <span className="ml-1 text-[8px] text-[#938e86]">· previous version</span>}</span><span className="text-[8px] text-[#938e86]">{width} × {height}</span></div>
+      <p className="mt-2 truncate text-[8px] text-[#938e86]" title={filename}>{filename} · {mediaType} · {(byteSize / 1024).toFixed(0)} KB</p><p className="mt-1 truncate font-mono text-[7px] text-[#aaa39a]" title={sha256}>SHA-256 {sha256}</p><p className="mt-1 text-[8px] text-[#aaa39a]">Uploaded {createdAt ? new Date(createdAt).toLocaleDateString() : 'date unavailable'}</p>
       <button disabled={reviewed || busy} onClick={async () => {
         setBusy(true); setError('');
         try {

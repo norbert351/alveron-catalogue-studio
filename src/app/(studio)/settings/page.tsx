@@ -4,6 +4,7 @@ import { Eyebrow } from '@/components/page-heading';
 import { env } from '@/lib/config';
 import { checkDatabase } from '@/lib/db';
 import type { LucideIcon } from 'lucide-react';
+import { SettingsHealthCheck } from '@/components/settings-health-check';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,10 +20,11 @@ export default async function SettingsPage() {
     <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
       <section className="border border-[#e3ded6] bg-white px-5 sm:px-7"><div className="border-b border-[#eee9e1] py-5"><Eyebrow>Runtime connections</Eyebrow><h2 className="display-serif mt-2 text-[22px]">Environment status</h2></div>
         <SettingRow icon={Database} title="PostgreSQL" detail="Private product, image, session and catalogue metadata." state={database ? 'Connected' : 'Unavailable'} ready={database} />
-        <SettingRow icon={HardDrive} title="Private image storage" detail={env.STORAGE_PROVIDER === 'local' ? 'Local private filesystem; files are excluded from Git and public routes.' : 'S3-compatible private bucket. Public ACLs are never requested.'} state={storageReady ? (env.STORAGE_PROVIDER === 'local' ? 'Local mode' : 'Configured') : 'Needs bucket settings'} ready={storageReady} />
+        <SettingRow icon={HardDrive} title="Private image storage" detail={env.STORAGE_PROVIDER === 'local' ? 'Persistent local filesystem under the configured data directory; back up .local-data/private with PostgreSQL.' : 'S3-compatible private bucket. Public ACLs are never requested.'} state={storageReady ? (env.STORAGE_PROVIDER === 'local' ? 'Local mode' : 'Configured') : 'Needs bucket settings'} ready={storageReady} />
         <SettingRow icon={KeyRound} title="Session signing secret" detail="Used to hash and validate server-side session tokens; value is never displayed." state={env.SESSION_SECRET && !env.SESSION_SECRET.startsWith('replace-') ? 'Configured' : 'Missing'} ready={Boolean(env.SESSION_SECRET && !env.SESSION_SECRET.startsWith('replace-'))} />
         <SettingRow icon={Sparkles} title="Image generation" detail="No provider adapter is connected. Catalogue generation is disabled." state="Disabled · no provider" ready={false} />
-        <SettingRow icon={Check} title="Owner approval before export" detail="There is no automatic storefront publish path. Export controls remain disabled until review is implemented." state="Required gate" ready />
+        <SettingRow icon={Check} title="Owner approval before export" detail="PNG, JPEG and PDF exports require an active approval for the exact output checksum and source revision. Nothing is published." state="Server enforced" ready />
+        <div className="py-4"><p className="text-[11px] font-medium">Upload and catalogue defaults</p><p className="mt-2 text-[9px] leading-relaxed text-[#938e86]">JPEG, PNG, WebP · 15 MB each · maximum 5 photos per request. Default catalogue layout: original-photo editorial, 1080 × 1350. Local filesystem storage and PostgreSQL are persistent across ordinary app rebuilds.</p><p className="mt-2 text-[9px] leading-relaxed text-[#938e86]">Session lifetime: 12 hours · HttpOnly, SameSite=Strict cookie. Owner account: one-time bootstrap; no default password.</p><SettingsHealthCheck /></div>
       </section>
       <aside className="h-fit border border-[#e3ded6] bg-white p-5"><CircleHelp size={16} className="text-[#b6222b]" /><h2 className="display-serif mt-4 text-[22px]">Local setup</h2><p className="mt-3 text-[10px] leading-[1.8] text-[#77736d]">Use the Docker PostgreSQL service and local private file storage during development. To use S3 in a deployed environment, set the server-side bucket settings in the host environment—never in browser-exposed variables.</p><div className="mt-4 border-t border-[#eee9e1] pt-4 text-[9px] leading-relaxed text-[#938e86]">Storage provider: <span className="font-medium text-[#504b46]">{env.STORAGE_PROVIDER}</span><br />Generation adapter: <span className="font-medium text-[#504b46]">none</span><br />Project setup: see README.md</div></aside>
     </div>

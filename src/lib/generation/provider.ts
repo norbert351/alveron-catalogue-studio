@@ -11,6 +11,9 @@ export type GenerationRequest = {
   }>;
   style: string;
   occasion: string;
+  width: number;
+  height: number;
+  signal: AbortSignal;
 };
 
 export type GeneratedImage = {

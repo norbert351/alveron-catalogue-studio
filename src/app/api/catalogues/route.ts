@@ -36,22 +36,28 @@ export async function POST(request: Request) {
   try {
     await client.query('BEGIN');
     await client.query("SELECT pg_advisory_xact_lock(hashtext('alveron-product-inventory'))");
+    const inventoryState = await client.query('SELECT revision FROM studio_inventory_state WHERE id=1');
+    if (!inventoryState.rowCount) throw new Error('Inventory revision state is missing.');
     const pending = await client.query(`SELECT count(*)::int AS count FROM product_images i LEFT JOIN product_image_reviews r ON r.product_image_id = i.id WHERE r.product_image_id IS NULL`);
     if (pending.rows[0].count > 0) {
       await client.query('ROLLBACK');
       return NextResponse.json({ error: 'Review every accessible product image before creating an outfit.' }, { status: 409 });
     }
     for (const [productId, imageId] of objectPairs) {
-      const image = await client.query('SELECT 1 FROM product_images WHERE id = $1 AND product_id = $2', [imageId, productId]);
-      if (!image.rowCount) {
+      const image = await client.query(`SELECT p.availability, i.is_current, i.id, i.sha256, i.object_key, i.storage_provider
+        FROM products p JOIN product_images i ON i.product_id=p.id
+        JOIN product_image_reviews r ON r.product_image_id=i.id
+        WHERE i.id=$1 AND p.id=$2`, [imageId, productId]);
+      if (!image.rowCount || image.rows[0].availability !== 'active' || !image.rows[0].is_current) {
         await client.query('ROLLBACK');
-        return NextResponse.json({ error: 'A selected original image does not belong to its product.' }, { status: 400 });
+        return NextResponse.json({ error: 'Selected items must be active products with current, reviewed source images.' }, { status: 400 });
       }
     }
     const catalogue = await client.query(
-      `INSERT INTO catalogues (title, style, occasion, mixed_style_requested, created_by)
-       VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-      [parsed.data.title, parsed.data.style, parsed.data.occasion, parsed.data.mixedStyleRequested, user.id],
+      `INSERT INTO catalogues (title, style, occasion, mixed_style_requested, created_by, source_snapshot)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+      [parsed.data.title, parsed.data.style, parsed.data.occasion, parsed.data.mixedStyleRequested, user.id,
+        JSON.stringify({ inventoryRevision: Number(inventoryState.rows[0].revision), items: parsed.data.items.map((item) => ({ productId: item.productId, imageId: item.imageId, role: item.role })), style: parsed.data.style, occasion: parsed.data.occasion, capturedAt: new Date().toISOString() })],
     );
     for (const [position, item] of parsed.data.items.entries()) {
       await client.query(

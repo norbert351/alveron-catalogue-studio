@@ -7,6 +7,8 @@ import { listProducts } from '@/lib/products';
 import { productInputSchema } from '@/lib/product-rules';
 import { MAX_PRODUCT_IMAGES, validateImage } from '@/lib/image-validation';
 import { getPrivateStorage } from '@/lib/storage';
+import { configuredStorageProvider } from '@/lib/storage';
+import { bumpInventoryRevision } from '@/lib/inventory';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -58,10 +60,14 @@ export async function POST(request: Request) {
     const tooLarge = error instanceof RangeError;
     return NextResponse.json({ error: tooLarge ? error.message : 'Upload could not be read. Use a multipart form with supported image files.' }, { status: tooLarge ? 413 : 400 });
   }
-  const parsed = productInputSchema.safeParse(Object.fromEntries(['name', 'sku', 'category', 'color', 'fabric', 'pattern', 'fit', 'notes'].map((key) => [key, form.get(key) ?? undefined])));
+  const parsed = productInputSchema.safeParse(Object.fromEntries(['name', 'sku', 'category', 'color', 'fabric', 'pattern', 'fit', 'notes', 'tags'].map((key) => [key, form.get(key) ?? undefined])));
   if (!parsed.success) return NextResponse.json({ error: 'Check the product name and category.' }, { status: 400 });
   const files = form.getAll('images').filter((value): value is File => value instanceof File && value.size > 0);
   if (!files.length || files.length > MAX_PRODUCT_IMAGES) return NextResponse.json({ error: `Add between 1 and ${MAX_PRODUCT_IMAGES} product photos.` }, { status: 400 });
+  const allowedViews = new Set(['front', 'back', 'side', 'close-up', 'detail', 'colour/design']);
+  const submittedViews = form.getAll('viewLabels').map(String);
+  const viewLabels = submittedViews.length === files.length ? submittedViews : files.map((_, index) => `Product view ${index + 1}`);
+  if (viewLabels.some((label) => !allowedViews.has(label) && !label.startsWith('Product view '))) return NextResponse.json({ error: 'Choose a valid label for each product image.' }, { status: 400 });
 
   const validated = [];
   try {
@@ -74,34 +80,60 @@ export async function POST(request: Request) {
   const storedKeys: string[] = [];
   const pool = getPool();
   const client = await pool.connect();
+  const idempotencyKey = request.headers.get('idempotency-key')?.trim() || randomUUID();
+  if (idempotencyKey.length > 200 || Array.from(idempotencyKey).some((character) => character.charCodeAt(0) < 32)) {
+    client.release();
+    return NextResponse.json({ error: 'The upload idempotency key is invalid.' }, { status: 400 });
+  }
+  const provider = configuredStorageProvider();
+  const rate = await pool.query("SELECT count(*)::int AS count FROM product_upload_requests WHERE user_id=$1 AND created_at>now()-interval '1 hour'", [user.id]).catch(() => null);
+  if (rate && rate.rows[0].count >= 20) { client.release(); return NextResponse.json({ error: 'Upload limit reached. Try again later.' }, { status: 429 }); }
+  const objectKeys = validated.map((entry) => `products/${productId}/${randomUUID()}.${entry.image.extension}`);
+  const requestSha = createHash('sha256').update(JSON.stringify({ product: parsed.data, views: viewLabels, images: validated.map(({ image }) => createHash('sha256').update(image.bytes).digest('hex')) })).digest('hex');
   try {
-    await client.query('BEGIN');
-    await client.query("SELECT pg_advisory_xact_lock(hashtext('alveron-product-inventory'))");
-    await client.query(
-      `INSERT INTO products (id, sku, name, category, color, fabric, pattern, fit, notes, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-      [productId, parsed.data.sku, parsed.data.name, parsed.data.category, parsed.data.color, parsed.data.fabric, parsed.data.pattern, parsed.data.fit, parsed.data.notes, user.id],
+    const reservation = await pool.query(
+      `INSERT INTO product_upload_requests (user_id, idempotency_key, request_sha256, status, object_keys)
+       VALUES ($1,$2,$3,'receiving',$4) ON CONFLICT (user_id,idempotency_key) DO NOTHING RETURNING id`,
+      [user.id, idempotencyKey, requestSha, JSON.stringify(objectKeys)],
     );
-    const storage = getPrivateStorage();
+    if (!reservation.rowCount) {
+      const prior = await pool.query('SELECT status, product_id,request_sha256 FROM product_upload_requests WHERE user_id=$1 AND idempotency_key=$2', [user.id, idempotencyKey]);
+      if (prior.rows[0]?.request_sha256 !== requestSha) return NextResponse.json({ error: 'This idempotency key was already used for different product content.' }, { status: 409 });
+      if (prior.rows[0]?.status === 'complete' && prior.rows[0].product_id) return NextResponse.json({ id: prior.rows[0].product_id, duplicate: true }, { status: 200 });
+      return NextResponse.json({ error: 'This upload request is already being processed or needs storage recovery. Use a new idempotency key after checking Upload Health.' }, { status: 409 });
+    }
+    const storage = getPrivateStorage(provider);
     for (const [index, entry] of validated.entries()) {
-      const imageId = randomUUID();
-      const key = `products/${productId}/${imageId}.${entry.image.extension}`;
+      const key = objectKeys[index];
       await storage.put(key, entry.image.bytes, entry.image.mediaType);
       storedKeys.push(key);
+    }
+    await client.query('BEGIN');
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('alveron-product-inventory'))");
+    await bumpInventoryRevision(client, 'Inventory revision changed after a product upload');
+    await client.query(
+      `INSERT INTO products (id, sku, name, category, color, fabric, pattern, fit, notes, tags, created_by, owner_attributes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [productId, parsed.data.sku, parsed.data.name, parsed.data.category, parsed.data.color, parsed.data.fabric, parsed.data.pattern, parsed.data.fit, parsed.data.notes, parsed.data.tags, user.id, JSON.stringify({ color: parsed.data.color, fabric: parsed.data.fabric, pattern: parsed.data.pattern, fit: parsed.data.fit })],
+    );
+    for (const [index, entry] of validated.entries()) {
+      const imageId = randomUUID();
+      const key = objectKeys[index];
       await client.query(
-        `INSERT INTO product_images (id, product_id, object_key, original_filename, media_type, byte_size, sha256, width, height, view_label)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-        [imageId, productId, key, entry.file.name.slice(0, 240) || `product-view-${index + 1}`, entry.image.mediaType, entry.image.bytes.length, createHash('sha256').update(entry.image.bytes).digest('hex'), entry.image.width, entry.image.height, `Product view ${index + 1}`],
+        `INSERT INTO product_images (id, product_id, object_key, original_filename, media_type, byte_size, sha256, width, height, view_label, storage_provider, colour_design_label)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [imageId, productId, key, entry.file.name.slice(0, 240) || `product-view-${index + 1}`, entry.image.mediaType, entry.image.bytes.length, createHash('sha256').update(entry.image.bytes).digest('hex'), entry.image.width, entry.image.height, viewLabels[index], provider, viewLabels[index] === 'colour/design' ? parsed.data.color : null],
       );
     }
     await client.query('INSERT INTO audit_events (actor_id, action, entity_type, entity_id, detail) VALUES ($1,$2,$3,$4,$5)', [user.id, 'product.created', 'product', productId, JSON.stringify({ imageCount: validated.length })]);
+    await client.query("UPDATE product_upload_requests SET status='complete', product_id=$3, updated_at=now() WHERE user_id=$1 AND idempotency_key=$2", [user.id, idempotencyKey, productId]);
     await client.query('COMMIT');
     return NextResponse.json({ id: productId }, { status: 201, headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);
-    await Promise.allSettled(storedKeys.map((key) => getPrivateStorage().remove(key)));
+    await pool.query("UPDATE product_upload_requests SET status='failed', object_keys=$3, error_code='upload_failed', updated_at=now() WHERE user_id=$1 AND idempotency_key=$2", [user.id, idempotencyKey, JSON.stringify(objectKeys)]).catch(() => undefined);
     const message = error instanceof Error ? error.message : '';
-    return NextResponse.json({ error: message.includes('duplicate key') ? 'That SKU is already in the library.' : 'Product could not be saved. Check storage and database configuration.' }, { status: 503 });
+    return NextResponse.json({ error: message.includes('duplicate key') ? 'That SKU is already in the library.' : storedKeys.length ? 'Product upload needs recovery. The original objects are preserved and recorded for storage recovery; do not retry with the same idempotency key.' : 'Product could not be saved. Check storage and database configuration.' }, { status: 503 });
   } finally {
     client.release();
   }

@@ -5,18 +5,19 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { ArrowRight, Check, LockKeyhole, LoaderCircle, Plus, Shirt } from 'lucide-react';
 import type { ProductCard } from '@/lib/products';
+import type { CatalogueSummary } from '@/lib/catalogues';
 
 const styles = [['modern-tailoring', 'Modern tailoring'], ['smart-casual', 'Smart casual'], ['weekend-casual', 'Weekend casual'], ['elevated-streetwear', 'Elevated streetwear']];
 const occasions = [['workwear', 'Workwear'], ['evening', 'Evening'], ['weekend', 'Weekend'], ['travel', 'Travel']];
 const roles = [['top', 'Top'], ['bottom', 'Bottom'], ['outerwear', 'Outerwear'], ['shoes', 'Shoes'], ['accessory', 'Accessory'], ['set', 'Set']];
 
-export function OutfitBuilder({ products, allReviewed }: { products: ProductCard[]; allReviewed: boolean }) {
-  const candidates = products.filter((product) => product.images.length > 0);
-  const [selected, setSelected] = useState<Array<{ productId: string; imageId: string; role: string }>>([]);
-  const [style, setStyle] = useState(styles[0][0]);
-  const [occasion, setOccasion] = useState(occasions[0][0]);
-  const [mixed, setMixed] = useState(false);
-  const [title, setTitle] = useState('Alveron editorial look');
+export function OutfitBuilder({ products, allReviewed, initialDraft }: { products: ProductCard[]; allReviewed: boolean; initialDraft?: CatalogueSummary }) {
+  const candidates = products.filter((product) => product.availability === 'active' && product.images.some((image) => image.current && image.reviewed));
+  const [selected, setSelected] = useState<Array<{ productId: string; imageId: string; role: string }>>(() => initialDraft?.items.map((item) => ({ productId: item.product_id, imageId: item.image_id, role: item.role })) ?? []);
+  const [style, setStyle] = useState(initialDraft?.style ?? styles[0][0]);
+  const [occasion, setOccasion] = useState(initialDraft?.occasion ?? occasions[0][0]);
+  const [mixed, setMixed] = useState(initialDraft?.mixed_style_requested ?? false);
+  const [title, setTitle] = useState(initialDraft?.title ?? 'Alveron editorial look');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState('');
@@ -32,11 +33,11 @@ export function OutfitBuilder({ products, allReviewed }: { products: ProductCard
       {candidates.length === 0 ? <div className="border border-dashed border-[#d7d0c6] bg-[#f8f6f2] px-6 py-14 text-center"><Shirt size={20} className="mx-auto mb-4 text-[#b6222b]" /><p className="display-serif text-2xl">No verified pieces to style.</p><p className="mt-2 text-[11px] text-[#77736d]">Upload Alveron product photos and review each image first.</p><Link href="/products" className="mt-5 inline-flex items-center gap-2 text-[10px] font-semibold text-[#b6222b]">Go to Product Library <ArrowRight size={13} /></Link></div> : candidates.map((product) => {
         const isSelected = selected.some((item) => item.productId === product.id);
         return <article key={product.id} className={`grid gap-4 border p-4 sm:grid-cols-[86px_1fr_auto] sm:items-center ${isSelected ? 'border-[#b6222b] bg-white' : 'border-[#e3ded6] bg-white'}`}>
-          <div className="relative aspect-[4/5] w-[86px] overflow-hidden bg-[#eee9e1]">{product.images[0] && <Image unoptimized fill sizes="86px" src={`/api/products/${product.id}/images/${product.images[0].id}`} alt={`Original ${product.name}`} className="object-contain" />}</div>
+          <div className="relative aspect-[4/5] w-[86px] overflow-hidden bg-[#eee9e1]">{product.images.find((image) => image.current && image.reviewed) && <Image unoptimized fill sizes="86px" src={`/api/products/${product.id}/images/${product.images.find((image) => image.current && image.reviewed)!.id}`} alt={`Original ${product.name}`} className="object-contain" />}</div>
           <div><h2 className="text-[12px] font-semibold">{product.name}</h2><p className="mt-1 text-[9px] capitalize text-[#938e86]">{product.category} · {product.color || 'colour not verified'}</p>{product.images.some((image) => !image.reviewed) && <p className="mt-2 text-[9px] text-[#a87326]">Some views still need review</p>}
-            {isSelected && <div className="mt-3 flex flex-wrap gap-2"><label className="text-[9px] text-[#746f69]">Role<select value={selected.find((item) => item.productId === product.id)?.role} onChange={(event) => updateItem(product.id, 'role', event.target.value)} className="ml-2 border border-[#ded8cf] bg-[#faf9f6] px-2 py-1 text-[9px] text-[#171717]">{roles.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="text-[9px] text-[#746f69]">Source view<select value={selected.find((item) => item.productId === product.id)?.imageId} onChange={(event) => updateItem(product.id, 'imageId', event.target.value)} className="ml-2 max-w-[180px] border border-[#ded8cf] bg-[#faf9f6] px-2 py-1 text-[9px] text-[#171717]">{product.images.map((image, index) => <option key={image.id} value={image.id}>{image.view_label} · {index + 1}</option>)}</select></label></div>}
+            {isSelected && <div className="mt-3 flex flex-wrap gap-2"><label className="text-[9px] text-[#746f69]">Role<select value={selected.find((item) => item.productId === product.id)?.role} onChange={(event) => updateItem(product.id, 'role', event.target.value)} className="ml-2 border border-[#ded8cf] bg-[#faf9f6] px-2 py-1 text-[9px] text-[#171717]">{roles.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="text-[9px] text-[#746f69]">Source view<select value={selected.find((item) => item.productId === product.id)?.imageId} onChange={(event) => updateItem(product.id, 'imageId', event.target.value)} className="ml-2 max-w-[180px] border border-[#ded8cf] bg-[#faf9f6] px-2 py-1 text-[9px] text-[#171717]">{product.images.filter((image) => image.current && image.reviewed).map((image, index) => <option key={image.id} value={image.id}>{image.view_label} · {index + 1}</option>)}</select></label></div>}
           </div>
-          <button disabled={!allReviewed} onClick={() => setSelected((current) => isSelected ? current.filter((item) => item.productId !== product.id) : [...current, { productId: product.id, imageId: product.images[0].id, role: product.category === 'tops' ? 'top' : product.category === 'bottoms' ? 'bottom' : product.category === 'sets' ? 'set' : product.category === 'shoes' ? 'shoes' : product.category === 'accessories' ? 'accessory' : 'outerwear' }])} className={`flex h-8 items-center justify-center gap-1.5 px-3 text-[9px] ${isSelected ? 'border border-[#ddd7ce] text-[#746f69]' : 'bg-[#171717] text-white hover:bg-[#b6222b]'} disabled:cursor-not-allowed disabled:opacity-40`}>{isSelected ? <><Check size={12} /> Added</> : <><Plus size={12} /> Add to outfit</>}</button>
+          <button disabled={!allReviewed || !product.images.some((image) => image.current && image.reviewed)} onClick={() => setSelected((current) => isSelected ? current.filter((item) => item.productId !== product.id) : [...current, { productId: product.id, imageId: product.images.find((image) => image.current && image.reviewed)!.id, role: product.category === 'tops' ? 'top' : product.category === 'bottoms' ? 'bottom' : product.category === 'sets' ? 'set' : product.category === 'shoes' ? 'shoes' : product.category === 'accessories' ? 'accessory' : 'outerwear' }])} className={`flex h-8 items-center justify-center gap-1.5 px-3 text-[9px] ${isSelected ? 'border border-[#ddd7ce] text-[#746f69]' : 'bg-[#171717] text-white hover:bg-[#b6222b]'} disabled:cursor-not-allowed disabled:opacity-40`}>{isSelected ? <><Check size={12} /> Added</> : <><Plus size={12} /> Add to outfit</>}</button>
         </article>;
       })}
     </section>
@@ -55,13 +56,13 @@ export function OutfitBuilder({ products, allReviewed }: { products: ProductCard
       {created ? <div className="mt-4 border border-[#d5e3d2] bg-[#f4f9f2] p-3 text-[10px] leading-relaxed text-[#477047]">Outfit saved as a draft. <Link href="/review" className="font-semibold underline">Open Catalogue Review</Link></div> : <button disabled={!allReviewed || selected.length < 2 || !completeOutfit || busy} onClick={async () => {
         setError(''); setBusy(true);
         try {
-          const response = await fetch('/api/catalogues', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, style, occasion, mixedStyleRequested: mixed, items: selected }) });
+          const response = await fetch(initialDraft ? `/api/catalogues/${initialDraft.id}` : '/api/catalogues', { method: initialDraft ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, style, occasion, mixedStyleRequested: mixed, items: selected }) });
           const result = await response.json() as { id?: string; error?: string };
           if (!response.ok) setError(result.error ?? 'The outfit could not be saved.'); else setCreated(result.id ?? 'created');
         } catch { setError('The studio could not be reached.'); }
         finally { setBusy(false); }
-      }} className="mt-5 flex h-10 w-full items-center justify-center gap-2 bg-[#171717] text-[10px] font-medium text-white hover:bg-[#b6222b] disabled:cursor-not-allowed disabled:opacity-35">{busy ? <><LoaderCircle size={13} className="animate-spin" /> Saving draft…</> : 'Save reviewable outfit'}<ArrowRight size={13} /></button>}
-      <p className="mt-3 text-[8px] leading-relaxed text-[#938e86]">Saving creates a reviewable outfit brief only. No garment is generated, and no catalogue is exported.</p>
+      }} className="mt-5 flex h-10 w-full items-center justify-center gap-2 bg-[#171717] text-[10px] font-medium text-white hover:bg-[#b6222b] disabled:cursor-not-allowed disabled:opacity-35">{busy ? <><LoaderCircle size={13} className="animate-spin" /> Saving draft…</> : initialDraft ? 'Update saved draft' : 'Save reviewable outfit'}<ArrowRight size={13} /></button>}
+      <p className="mt-3 text-[8px] leading-relaxed text-[#938e86]">{initialDraft ? `Editing saved draft ${initialDraft.id}.` : 'Saving creates a reviewable outfit brief only.'} No garment is generated by this action, and nothing is exported.</p>
     </aside>
   </div>;
 }
