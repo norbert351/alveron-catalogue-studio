@@ -1,0 +1,75 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { productInputSchema } from '../src/lib/product-rules';
+import { catalogueInputSchema } from '../src/lib/catalogue-rules';
+import { hasStudioAccess, isSafeObjectKey, isSameOrigin } from '../src/lib/security-rules';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { storeImmutableFile } from '../src/lib/storage-files';
+
+const productA = '2bb7f6f9-d43e-45b7-9f2e-67ca60629c91';
+const productB = '4110a8f6-fce7-4586-bbcc-0902ac5a9b66';
+const imageA = 'a450f676-1494-4ef1-ae29-9059d50d29c1';
+const imageB = 'e6a94b40-68d2-4825-ab4e-5327ea6bea26';
+
+test('product metadata retains unknown visual attributes as null', () => {
+  const parsed = productInputSchema.parse({ name: '  Wool jacket ', category: 'outerwear' });
+  assert.equal(parsed.name, 'Wool jacket');
+  assert.equal(parsed.color, null);
+  assert.equal(parsed.fabric, null);
+  assert.equal(parsed.pattern, null);
+  assert.equal(parsed.fit, null);
+});
+
+test('product input rejects unsupported categories and blank names', () => {
+  assert.equal(productInputSchema.safeParse({ name: 'X', category: 'uniform' }).success, false);
+  assert.equal(productInputSchema.safeParse({ name: ' ', category: 'tops' }).success, false);
+});
+
+test('catalogue input requires a single known style and occasion plus distinct uploaded product references', () => {
+  const valid = { title: 'Evening look', style: 'modern-tailoring', occasion: 'evening', items: [{ productId: productA, imageId: imageA, role: 'top' }, { productId: productB, imageId: imageB, role: 'bottom' }] };
+  const parsed = catalogueInputSchema.parse(valid);
+  assert.equal(parsed.mixedStyleRequested, false);
+  assert.equal(catalogueInputSchema.safeParse({ ...valid, style: ['modern-tailoring', 'weekend-casual'] }).success, false);
+  assert.equal(catalogueInputSchema.safeParse({ ...valid, occasion: 'all' }).success, false);
+  assert.equal(catalogueInputSchema.safeParse({ ...valid, items: [valid.items[0], { ...valid.items[1], productId: productA }] }).success, false);
+  assert.equal(catalogueInputSchema.safeParse({ ...valid, items: [valid.items[0], { ...valid.items[1], role: 'outerwear' }] }).success, false);
+});
+
+test('mixed style is recorded only after an explicit request', () => {
+  const input = { title: 'Look', style: 'smart-casual', occasion: 'weekend', mixedStyleRequested: true, items: [{ productId: productA, imageId: imageA, role: 'top' }, { productId: productB, imageId: imageB, role: 'bottom' }] };
+  assert.equal(catalogueInputSchema.parse(input).mixedStyleRequested, true);
+});
+
+test('private image routes require an authenticated studio identity', () => {
+  assert.equal(hasStudioAccess(null), false);
+  assert.equal(hasStudioAccess(undefined), false);
+  assert.equal(hasStudioAccess({ id: productA, role: 'owner' }), true);
+  assert.equal(hasStudioAccess({ id: productA, role: 'editor' }), true);
+});
+
+test('state-changing requests require a same-origin browser request', () => {
+  assert.equal(isSameOrigin('http://localhost:3000/api/products', 'http://localhost:3000'), true);
+  assert.equal(isSameOrigin('http://localhost:3000/api/products', 'http://127.0.0.1:3000', '127.0.0.1:3000'), true);
+  assert.equal(isSameOrigin('http://localhost:3000/api/products', 'https://attacker.example'), false);
+  assert.equal(isSameOrigin('http://localhost:3000/api/products', null), false);
+});
+
+test('object keys reject path traversal and unexpected suffixes', () => {
+  assert.equal(isSafeObjectKey('products/abc/item_123.webp'), true);
+  assert.equal(isSafeObjectKey('../public/image.jpg'), false);
+  assert.equal(isSafeObjectKey('products/abc/item.svg'), false);
+});
+
+test('original file keys are write-once and cannot be silently replaced', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'alveron-storage-test-'));
+  const original = Buffer.from('owner-upload-original');
+  try {
+    await storeImmutableFile(root, 'products/product_a/image_a.jpg', original);
+    await assert.rejects(storeImmutableFile(root, 'products/product_a/image_a.jpg', Buffer.from('replacement')));
+    assert.deepEqual(await readFile(join(root, 'products/product_a/image_a.jpg')), original);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
