@@ -1,18 +1,26 @@
-// Proves the private store is found regardless of the process working directory.
-// Usage: node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/check-storage-root.mts
+// Proves the private store resolves to a real, dedicated, absolute directory and
+// rejects disposable or public locations.
+//
+//   npm run storage:root
+//
+// Run it from anywhere; it also reports the effective base directory so a
+// cwd-related misconfiguration is visible before it causes missing images.
 import { resolve } from 'node:path';
-import { STORAGE_ROOT } from '../src/lib/config';
+import { STORAGE_ROOT, env } from '../src/lib/config';
 
-const expected = resolve(import.meta.dirname, '..', '.local-data', 'private');
-console.log(`process.cwd()      = ${process.cwd()}`);
-console.log(`STORAGE_ROOT       = ${STORAGE_ROOT}`);
-console.log(`expected (project) = ${expected}`);
-if (STORAGE_ROOT !== expected) {
-  console.error('FAIL: storage root does not point at the project data directory.');
-  process.exit(1);
+const base = process.env.ALVERON_PROJECT_ROOT ? resolve(process.env.ALVERON_PROJECT_ROOT) : process.cwd();
+console.log(`process.cwd()             = ${process.cwd()}`);
+console.log(`base for relative paths   = ${base}${process.env.ALVERON_PROJECT_ROOT ? ' (ALVERON_PROJECT_ROOT)' : ''}`);
+console.log(`LOCAL_STORAGE_DIR (config)= ${env.LOCAL_STORAGE_DIR}`);
+console.log(`STORAGE_ROOT (resolved)   = ${STORAGE_ROOT}`);
+
+let failed = false;
+if (!STORAGE_ROOT.startsWith('/')) { console.error('FAIL: storage root is not absolute.'); failed = true; }
+for (const fragment of ['/.next/', '/public/', '/tmp/', '/node_modules/']) {
+  if (`${STORAGE_ROOT}/`.includes(fragment)) { console.error(`FAIL: storage root is inside ${fragment}`); failed = true; }
 }
-if (STORAGE_ROOT.includes('/tmp/') || STORAGE_ROOT.includes('/.next/') || STORAGE_ROOT.includes('/public/')) {
-  console.error('FAIL: storage root is inside a disposable or public location.');
-  process.exit(1);
-}
-console.log('PASS: storage root is absolute and independent of the working directory.');
+if (STORAGE_ROOT === '/') { console.error('FAIL: storage root is the filesystem root.'); failed = true; }
+
+if (failed) process.exit(1);
+console.log('PASS: storage root is an absolute, dedicated directory outside build output and temp paths.');
+console.log('Back this directory up together with the PostgreSQL database.');

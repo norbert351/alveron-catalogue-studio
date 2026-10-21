@@ -24,26 +24,39 @@ export const env = configSchema.parse(process.env);
 /**
  * Absolute location of the private file store.
  *
- * A relative LOCAL_STORAGE_DIR is resolved against the project root, not the
- * process working directory. Without this, starting the app from a different
- * cwd (systemd unit, container WORKDIR, /tmp during a test) would silently point
- * at a different directory and every stored original would look missing.
+ * Resolution order for a relative LOCAL_STORAGE_DIR:
+ *   1. ALVERON_PROJECT_ROOT   — explicit override for systemd/containers, where
+ *                               you can set the project path precisely.
+ *   2. process.cwd()          — how npm scripts and `next start` normally run.
  *
- * This directory must live outside .next/build output, public/, and temp paths.
+ * Neither __dirname (bundler-mangled inside server routes) nor a bare relative
+ * path (cwd-dependent) is safe here: both can silently point the store at a
+ * different directory, which would make every stored original look missing.
+ *
+ * The resolved directory must not sit inside build output, public assets, or a
+ * temporary directory, because those are disposable or world-readable.
  */
 export const STORAGE_ROOT: string = (() => {
   const configured = env.LOCAL_STORAGE_DIR;
-  // Anchor relative paths to this file's own location (src/lib -> project root)
-  // rather than process.cwd(), so the store is found no matter how the process
-  // is launched (npm script, systemd unit, container with a different WORKDIR).
-  const projectRoot = resolve(__dirname, '..', '..');
-  const absolute = isAbsolute(configured) ? configured : resolve(projectRoot, configured);
-  const forbidden = ['/.next/', '/public/', '/tmp/', '/node_modules/'];
+  const base = process.env.ALVERON_PROJECT_ROOT
+    ? resolve(process.env.ALVERON_PROJECT_ROOT)
+    : process.cwd();
+  const absolute = isAbsolute(configured) ? resolve(configured) : resolve(base, configured);
+  const forbidden: Array<[string, string]> = [
+    ['/.next/', '.next build output'],
+    ['/public/', 'the public/ directory'],
+    ['/tmp/', 'a temporary directory'],
+    ['/node_modules/', 'node_modules'],
+  ];
   const normalised = `${absolute.replaceAll('\\', '/')}/`;
-  for (const fragment of forbidden) {
+  for (const [fragment, description] of forbidden) {
     if (normalised.includes(fragment)) {
-      throw new Error(`LOCAL_STORAGE_DIR must not point inside ${fragment.replaceAll('/', '')} (disposable or public). Use a dedicated data directory and back it up.`);
+      throw new Error(`LOCAL_STORAGE_DIR must not point inside ${description}. Use a dedicated, backed-up data directory (see README "Storage"). Resolved to: ${absolute}`);
     }
+  }
+  // A path that resolved to the filesystem root is always a configuration error.
+  if (absolute === '/') {
+    throw new Error('LOCAL_STORAGE_DIR resolved to the filesystem root. Set an absolute path or ALVERON_PROJECT_ROOT.');
   }
   return absolute;
 })();
