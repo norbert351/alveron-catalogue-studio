@@ -12,7 +12,8 @@
     "test:e2e": "node --env-file-if-exists=.env.local scripts/e2e-smoke.mjs",
     "db:migrate": "node --env-file-if-exists=.env.local scripts/migrate.mjs",
     "db:bootstrap": "node --env-file-if-exists=.env.local scripts/bootstrap-owner.mjs",
-    "storage:migrate": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/migrate-storage.ts"
+    "storage:migrate": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/migrate-storage.mts",
+    "storage:verify": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/verify-storage.mts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1153.0",
