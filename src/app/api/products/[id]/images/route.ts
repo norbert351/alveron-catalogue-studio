@@ -7,6 +7,7 @@ import { MAX_PRODUCT_IMAGES, validateImage } from '@/lib/image-validation';
 import { hasStudioAccess } from '@/lib/security-rules';
 import { configuredStorageProvider, getPrivateStorage } from '@/lib/storage';
 import { bumpInventoryRevision } from '@/lib/inventory';
+import { persistDerivatives } from '@/lib/derivative-store';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -60,6 +61,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ error: 'This upload request is already running or needs recovery. Use a new idempotency key after reviewing upload health.' }, { status: 409 });
   }
   let stored = 0;
+  const createdImages: Array<{ imageId: string; bytes: Buffer }> = [];
   const client = await pool.connect();
   try {
     const storage = getPrivateStorage(provider);
@@ -77,10 +79,22 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       }
       await client.query(`INSERT INTO product_images (id,product_id,object_key,original_filename,media_type,byte_size,sha256,width,height,view_label,storage_provider,supersedes_image_id,colour_design_label)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, [imageId, productId, keys[index], entry.file.name.slice(0, 240) || `view-${index + 1}`, image.mediaType, image.bytes.length, createHash('sha256').update(image.bytes).digest('hex'), image.width, image.height, views[index], provider, replacesId, views[index] === 'colour/design' ? product.rows[0].color : null]);
+      createdImages.push({ imageId, bytes: image.bytes });
     }
     await client.query('INSERT INTO audit_events (actor_id,action,entity_type,entity_id,detail) VALUES ($1,$2,$3,$4,$5)', [user.id, 'product.images_added', 'product', productId, JSON.stringify({ imageCount: files.length })]);
     await client.query("UPDATE product_upload_requests SET status='complete',updated_at=now() WHERE user_id=$1 AND idempotency_key=$2", [user.id, requestId]);
     await client.query('COMMIT');
+    // After commit: derivatives are a display optimisation, never a reason to
+    // fail an upload whose immutable originals are already safe.
+    for (const created of createdImages) {
+      await persistDerivatives(client, storage, {
+        productId,
+        imageId: created.imageId,
+        originalBytes: created.bytes,
+        originalSha256: createHash('sha256').update(created.bytes).digest('hex'),
+        provider,
+      });
+    }
     return NextResponse.json({ id: productId, imageCount: files.length }, { status: 201, headers: { 'Cache-Control': 'no-store' } });
   } catch {
     await client.query('ROLLBACK').catch(() => undefined);

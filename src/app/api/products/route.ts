@@ -9,6 +9,7 @@ import { MAX_PRODUCT_IMAGES, validateImage } from '@/lib/image-validation';
 import { getPrivateStorage } from '@/lib/storage';
 import { configuredStorageProvider } from '@/lib/storage';
 import { bumpInventoryRevision } from '@/lib/inventory';
+import { persistDerivatives } from '@/lib/derivative-store';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -78,6 +79,7 @@ export async function POST(request: Request) {
 
   const productId = randomUUID();
   const storedKeys: string[] = [];
+  const imageIds: string[] = [];
   const pool = getPool();
   const client = await pool.connect();
   const idempotencyKey = request.headers.get('idempotency-key')?.trim() || randomUUID();
@@ -118,6 +120,7 @@ export async function POST(request: Request) {
     );
     for (const [index, entry] of validated.entries()) {
       const imageId = randomUUID();
+      imageIds.push(imageId);
       const key = objectKeys[index];
       await client.query(
         `INSERT INTO product_images (id, product_id, object_key, original_filename, media_type, byte_size, sha256, width, height, view_label, storage_provider, colour_design_label)
@@ -128,6 +131,18 @@ export async function POST(request: Request) {
     await client.query('INSERT INTO audit_events (actor_id, action, entity_type, entity_id, detail) VALUES ($1,$2,$3,$4,$5)', [user.id, 'product.created', 'product', productId, JSON.stringify({ imageCount: validated.length })]);
     await client.query("UPDATE product_upload_requests SET status='complete', product_id=$3, updated_at=now() WHERE user_id=$1 AND idempotency_key=$2", [user.id, idempotencyKey, productId]);
     await client.query('COMMIT');
+    // Originals are committed and immutable from here. Derivatives are display
+    // conveniences: if one fails, the upload still succeeds and the UI falls back
+    // to the authenticated original route.
+    for (const [index, imageId] of imageIds.entries()) {
+      await persistDerivatives(client, storage, {
+        productId,
+        imageId,
+        originalBytes: validated[index].image.bytes,
+        originalSha256: createHash('sha256').update(validated[index].image.bytes).digest('hex'),
+        provider,
+      });
+    }
     return NextResponse.json({ id: productId }, { status: 201, headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);

@@ -1,9 +1,9 @@
 'use client';
 
-import Image from 'next/image';
 import Link from 'next/link';
 import { useState } from 'react';
 import { ArrowRight, Check, LockKeyhole, LoaderCircle, Plus, Shirt } from 'lucide-react';
+import { ProductImageView } from './product-image-view';
 import type { ProductCard } from '@/lib/products';
 import type { CatalogueSummary } from '@/lib/catalogues';
 
@@ -33,7 +33,7 @@ export function OutfitBuilder({ products, allReviewed, initialDraft }: { product
       {candidates.length === 0 ? <div className="border border-dashed border-[#d7d0c6] bg-[#f8f6f2] px-6 py-14 text-center"><Shirt size={20} className="mx-auto mb-4 text-[#b6222b]" /><p className="display-serif text-2xl">No verified pieces to style.</p><p className="mt-2 text-[11px] text-[#77736d]">Upload Alveron product photos and review each image first.</p><Link href="/products" className="mt-5 inline-flex items-center gap-2 text-[10px] font-semibold text-[#b6222b]">Go to Product Library <ArrowRight size={13} /></Link></div> : candidates.map((product) => {
         const isSelected = selected.some((item) => item.productId === product.id);
         return <article key={product.id} className={`grid gap-4 border p-4 sm:grid-cols-[86px_1fr_auto] sm:items-center ${isSelected ? 'border-[#b6222b] bg-white' : 'border-[#e3ded6] bg-white'}`}>
-          <div className="relative aspect-[4/5] w-[86px] overflow-hidden bg-[#eee9e1]">{product.images.find((image) => image.current && image.reviewed) && <Image unoptimized fill sizes="86px" src={`/api/products/${product.id}/images/${product.images.find((image) => image.current && image.reviewed)!.id}`} alt={`Original ${product.name}`} className="object-contain" />}</div>
+          <div className="relative aspect-[4/5] w-[86px] overflow-hidden bg-[#eee9e1]">{product.images.find((image) => image.current && image.reviewed) && <ProductImageView productId={product.id} imageId={product.images.find((image) => image.current && image.reviewed)!.id} hasThumbnail={product.images.find((image) => image.current && image.reviewed)!.has_thumbnail} alt={`Original ${product.name}`} sizes="86px" />}</div>
           <div><h2 className="text-[12px] font-semibold">{product.name}</h2><p className="mt-1 text-[9px] capitalize text-[#938e86]">{product.category} · {product.color || 'colour not verified'}</p>{product.images.some((image) => !image.reviewed) && <p className="mt-2 text-[9px] text-[#a87326]">Some views still need review</p>}
             {isSelected && <div className="mt-3 flex flex-wrap gap-2"><label className="text-[9px] text-[#746f69]">Role<select value={selected.find((item) => item.productId === product.id)?.role} onChange={(event) => updateItem(product.id, 'role', event.target.value)} className="ml-2 border border-[#ded8cf] bg-[#faf9f6] px-2 py-1 text-[9px] text-[#171717]">{roles.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="text-[9px] text-[#746f69]">Source view<select value={selected.find((item) => item.productId === product.id)?.imageId} onChange={(event) => updateItem(product.id, 'imageId', event.target.value)} className="ml-2 max-w-[180px] border border-[#ded8cf] bg-[#faf9f6] px-2 py-1 text-[9px] text-[#171717]">{product.images.filter((image) => image.current && image.reviewed).map((image, index) => <option key={image.id} value={image.id}>{image.view_label} · {index + 1}</option>)}</select></label></div>}
           </div>

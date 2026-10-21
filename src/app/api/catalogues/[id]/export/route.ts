@@ -9,6 +9,7 @@ import { isApprovalCurrent } from '@/lib/approval-rules';
 import { jpegPagePdf } from '@/lib/pdf';
 import { hasStudioAccess } from '@/lib/security-rules';
 import { configuredStorageProvider, getPrivateStorage } from '@/lib/storage';
+import { clearRecoveryObject, discardRecoveryObject, reserveRecoveryObject } from '@/lib/storage-recovery';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -50,11 +51,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const sha256 = createHash('sha256').update(bytes).digest('hex');
     const exportId = randomUUID(); const provider = configuredStorageProvider();
     const objectKey = `catalogues/${id}/exports/${exportId}.${format === 'jpeg' ? 'jpg' : format}`;
-    const recovery = await getPool().query(`INSERT INTO storage_recovery_objects (object_key,storage_provider,purpose,entity_id,expected_sha256,byte_size)
-      VALUES ($1,$2,'catalogue-export',$3,$4,$5) RETURNING id`, [objectKey, provider, id, sha256, bytes.length]);
-    await getPrivateStorage(provider).put(objectKey, bytes, mediaType);
+    const storage = getPrivateStorage(provider);
+    const recoveryId = await reserveRecoveryObject(getPool(), { objectKey, provider, purpose: 'catalogue-export', entityId: id, sha256, byteSize: bytes.length });
     const client = await getPool().connect();
     try {
+      await storage.put(objectKey, bytes, mediaType);
       await client.query('BEGIN');
       const recheck = await client.query(`SELECT c.status,c.revision,a.sha256,ap.approved_revision,ap.output_sha256,ap.invalidated_at
         FROM catalogues c JOIN generated_assets a ON a.catalogue_id=c.id
@@ -67,11 +68,18 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       await client.query("UPDATE catalogues SET status='exported',updated_at=now() WHERE id=$1", [id]);
       await client.query('INSERT INTO audit_events(actor_id,action,entity_type,entity_id,detail) VALUES($1,$2,$3,$4,$5)', [user.id, 'catalogue.exported', 'catalogue', id, JSON.stringify({ exportId, assetId: parsed.data.assetId, outputSha256: row.sha256, format, width, height, exportSha256: sha256 })]);
       await client.query('COMMIT');
-    } catch (error) { await client.query('ROLLBACK').catch(() => undefined); throw error; }
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      // The export was not committed, so its bytes must not linger as an
+      // untracked object. Remove the file, then the recovery row.
+      await discardRecoveryObject(getPool(), storage, recoveryId, objectKey);
+      throw error;
+    }
     finally { client.release(); }
-    await getPool().query('DELETE FROM storage_recovery_objects WHERE id=$1', [recovery.rows[0].id]);
+    await clearRecoveryObject(getPool(), recoveryId);
     return new Response(new Uint8Array(bytes), { headers: { 'Content-Type': mediaType, 'Content-Length': String(bytes.length), 'Content-Disposition': `attachment; filename="alveron-${id}.${format === 'jpeg' ? 'jpg' : format}"`, 'Cache-Control': 'private, no-store', 'X-Export-ID': exportId, 'X-Export-SHA256': sha256 } });
-  } catch {
+  } catch (error) {
+    console.error('Catalogue export failed:', error instanceof Error ? error.message : error);
     return NextResponse.json({ error: 'Export could not be completed. Check approval and private storage health, then try again.' }, { status: 503 });
   }
 }

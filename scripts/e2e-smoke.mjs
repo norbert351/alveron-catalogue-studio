@@ -182,6 +182,38 @@ try {
     assert.equal(state.rows[0].status, 'draft'); assert.ok(approval.rows[0].invalidated_at);
   });
 
+  await check('Uploaded originals get separate display derivatives that never replace the original', async () => {
+    const derivatives = await pool.query('SELECT kind,object_key,byte_size,sha256,source_sha256,width,height FROM product_image_derivatives WHERE product_image_id=$1 ORDER BY kind', [selectedFront.id]);
+    assert.ok(derivatives.rowCount >= 1, 'expected at least a thumbnail derivative for the uploaded original');
+    const originalRow = await pool.query('SELECT object_key,sha256,byte_size FROM product_images WHERE id=$1', [selectedFront.id]);
+    for (const derivative of derivatives.rows) {
+      // Distinct key space: a derivative must never sit on the original's key.
+      assert.notEqual(derivative.object_key, originalRow.rows[0].object_key);
+      assert.ok(derivative.object_key.startsWith('derivatives/'), `derivative key ${derivative.object_key} is outside the derivative key space`);
+      // Provenance: recorded against the exact original bytes.
+      assert.equal(derivative.source_sha256, originalRow.rows[0].sha256);
+      // Smaller or equal, never a re-encode of the original in place.
+      assert.ok(Number(derivative.byte_size) > 0);
+    }
+    // The original is byte-identical after derivative generation.
+    const originalAfter = await api(`/api/products/${productA}/images/${selectedFront.id}`, { headers: headers(cookie) });
+    assert.equal(originalAfter.status, 200);
+    assert.deepEqual(Buffer.from(await originalAfter.arrayBuffer()), firstBytes);
+
+    // Derivative is served only to an authenticated studio user.
+    const thumbKind = derivatives.rows[0].kind;
+    const anonymous = await api(`/api/products/${productA}/images/${selectedFront.id}/derivatives/${thumbKind}`);
+    assert.equal(anonymous.status, 401);
+    const served = await api(`/api/products/${productA}/images/${selectedFront.id}/derivatives/${thumbKind}`, { headers: headers(cookie) });
+    assert.equal(served.status, 200);
+    assert.equal(served.headers.get('content-type'), 'image/webp');
+    const servedBytes = Buffer.from(await served.arrayBuffer());
+    assert.equal(served.headers.get('x-derivative-sha256'), createHash('sha256').update(servedBytes).digest('hex'));
+    assert.equal(served.headers.get('x-source-sha256'), originalRow.rows[0].sha256);
+    // The preview is a re-encode, so it must not be byte-identical to the original.
+    assert.ok(!servedBytes.equals(firstBytes));
+  });
+
   await check('Storage health, recovery inventory and audit records remain accessible', async () => {
     const health = await api('/api/settings/health', { headers: headers(cookie) }); assert.equal(health.status, 200);
     const body = await health.json(); assert.equal(body.database, 'ready'); assert.equal(body.storage, 'ready');

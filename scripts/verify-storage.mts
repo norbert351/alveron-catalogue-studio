@@ -77,7 +77,6 @@ async function listLocalObjects(root: string): Promise<string[]> {
 const pool = new pg.Pool({ connectionString: env.DATABASE_URL });
 const outcomes: Outcome[] = [];
 let orphans: string[] = [];
-let errorCount = 0;
 
 try {
   const refs: Ref[] = [];
@@ -193,6 +192,5 @@ if (asJson) {
   if (reportPath) console.log(`\nReport written to ${resolve(reportPath)}`);
 }
 
-errorCount = drifted;
 await pool.end();
-process.exit(errorCount > 0 ? 1 : 0);
+process.exit(drifted > 0 ? 1 : 0);

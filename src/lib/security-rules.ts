@@ -31,7 +31,12 @@ export function isSafeObjectKey(key: string): boolean {
   if (typeof key !== 'string' || key.length === 0 || key.length > 512) return false;
   if (key.startsWith('/') || key.endsWith('/')) return false;
   if (key.includes('..') || key.includes('//') || key.includes('\\')) return false;
-  // Reject control characters, whitespace, and anything outside the generated alphabet.
-  if (/[\u0000-\u001f\u007f\s]/.test(key)) return false;
+  // Reject control characters and whitespace explicitly (no regex control escapes,
+  // so this stays readable and lint-clean).
+  for (const character of key) {
+    const code = character.codePointAt(0) ?? 0;
+    if (code <= 31 || code === 127) return false;
+  }
+  if (/\s/.test(key)) return false;
   return OBJECT_KEY_PATTERN.test(key);
 }
