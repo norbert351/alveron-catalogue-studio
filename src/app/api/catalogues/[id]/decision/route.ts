@@ -48,7 +48,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (bytes.length !== Number(row.byte_size) || actualSha !== row.sha256) { await client.query('ROLLBACK'); return NextResponse.json({ error: 'Output integrity check failed; approval is blocked.' }, { status: 409 }); }
     const snapshot = row.input_snapshot as { revision?: number; inventoryRevision?: number; items?: Array<{ productId: string; imageId: string; sha256: string; role: string }> };
     const inventory = await client.query('SELECT revision FROM studio_inventory_state WHERE id=1');
-    const current = await client.query(`SELECT p.availability,i.id AS image_id,i.sha256,ci.outfit_role AS role
+    const current = await client.query(`SELECT p.availability,i.id AS image_id,i.sha256,i.is_current,ci.outfit_role AS role,
+      (r.product_image_id IS NOT NULL) AS reviewed
       FROM catalogue_items ci JOIN products p ON p.id=ci.product_id JOIN product_images i ON i.id=ci.product_image_id
       LEFT JOIN product_image_reviews r ON r.product_image_id=i.id WHERE ci.catalogue_id=$1 ORDER BY ci.position`, [id]);
     const inputsMatch = snapshot?.revision === Number(catalogue.rows[0].revision) && snapshot.inventoryRevision === Number(inventory.rows[0]?.revision) && snapshot.items?.length === current.rows.length && snapshot.items.every((source, index) => source.imageId === current.rows[index].image_id && source.sha256 === current.rows[index].sha256 && source.role === current.rows[index].role && current.rows[index].availability === 'active' && current.rows[index].reviewed);

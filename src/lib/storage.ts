@@ -29,9 +29,10 @@ class LocalPrivateStorage implements PrivateStorage {
   }
 
   async head(key: string) {
+    // Read through the guarded resolver so head() can never touch a path outside
+    // the private root; key validation is applied by resolvePrivatePath.
     const file = await readPrivateFile(this.root, key);
-    const metadata = await stat(`${this.root}/${key}`);
-    return { byteSize: metadata.size, sha256: createHash('sha256').update(file).digest('hex') };
+    return { byteSize: file.length, sha256: createHash('sha256').update(file).digest('hex') };
   }
 
   async health(): Promise<void> {
