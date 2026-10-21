@@ -3,13 +3,14 @@ import { NextResponse } from 'next/server';
 import { getCurrentUser, isSameOrigin } from '@/lib/auth';
 import { hasStudioAccess } from '@/lib/security-rules';
 import { getPool } from '@/lib/db';
-import { listProducts } from '@/lib/products';
+import { listProducts, listProductsPaged } from '@/lib/products';
 import { productInputSchema } from '@/lib/product-rules';
 import { MAX_PRODUCT_IMAGES, validateImage } from '@/lib/image-validation';
 import { getPrivateStorage } from '@/lib/storage';
 import { configuredStorageProvider } from '@/lib/storage';
 import { bumpInventoryRevision } from '@/lib/inventory';
 import { persistDerivatives } from '@/lib/derivative-store';
+import { buildPage, countUnreviewedImages, parsePageRequest } from '@/lib/pagination';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -38,10 +39,28 @@ async function readBoundedForm(request: Request): Promise<FormData> {
   return new Request(request.url, { method: 'POST', headers: { 'Content-Type': contentType }, body }).formData();
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   if (!hasStudioAccess(await getCurrentUser())) return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
+  const url = new URL(request.url);
+  const paging = parsePageRequest({ page: url.searchParams.get('page') ?? undefined, pageSize: url.searchParams.get('pageSize') ?? undefined });
+  const wantsPaging = url.searchParams.has('page') || url.searchParams.has('pageSize') || url.searchParams.has('search');
   try {
-    return NextResponse.json({ products: await listProducts() }, { headers: { 'Cache-Control': 'private, no-store' } });
+    if (!wantsPaging) {
+      // Legacy shape kept intact for existing callers that expect the full list.
+      const products = await listProducts();
+      return NextResponse.json({ products, total: products.length, page: 1, pageSize: products.length, totalPages: 1, unreviewed: await countUnreviewedImages() }, { headers: { 'Cache-Control': 'private, no-store' } });
+    }
+    const { products, total } = await listProductsPaged({
+      page: paging.page,
+      pageSize: paging.pageSize,
+      search: url.searchParams.get('search') ?? undefined,
+      category: url.searchParams.get('category') ?? undefined,
+      availability: url.searchParams.get('availability') ?? undefined,
+      uploadedFrom: url.searchParams.get('uploadedFrom') ?? undefined,
+      uploadedThrough: url.searchParams.get('uploadedThrough') ?? undefined,
+    });
+    const page = buildPage(products, paging, total);
+    return NextResponse.json({ ...page, unreviewed: await countUnreviewedImages() }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch {
     return NextResponse.json({ error: 'Product library is unavailable. Check the database setup.' }, { status: 503 });
   }

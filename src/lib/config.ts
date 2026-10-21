@@ -1,5 +1,6 @@
 import 'server-only';
 import { z } from 'zod';
+import { isAbsolute, resolve } from 'node:path';
 
 const blankToUndefined = (value: unknown) => value === '' ? undefined : value;
 const optionalString = z.preprocess(blankToUndefined, z.string().optional());
@@ -19,6 +20,33 @@ const configSchema = z.object({
 });
 
 export const env = configSchema.parse(process.env);
+
+/**
+ * Absolute location of the private file store.
+ *
+ * A relative LOCAL_STORAGE_DIR is resolved against the project root, not the
+ * process working directory. Without this, starting the app from a different
+ * cwd (systemd unit, container WORKDIR, /tmp during a test) would silently point
+ * at a different directory and every stored original would look missing.
+ *
+ * This directory must live outside .next/build output, public/, and temp paths.
+ */
+export const STORAGE_ROOT: string = (() => {
+  const configured = env.LOCAL_STORAGE_DIR;
+  // Anchor relative paths to this file's own location (src/lib -> project root)
+  // rather than process.cwd(), so the store is found no matter how the process
+  // is launched (npm script, systemd unit, container with a different WORKDIR).
+  const projectRoot = resolve(__dirname, '..', '..');
+  const absolute = isAbsolute(configured) ? configured : resolve(projectRoot, configured);
+  const forbidden = ['/.next/', '/public/', '/tmp/', '/node_modules/'];
+  const normalised = `${absolute.replaceAll('\\', '/')}/`;
+  for (const fragment of forbidden) {
+    if (normalised.includes(fragment)) {
+      throw new Error(`LOCAL_STORAGE_DIR must not point inside ${fragment.replaceAll('/', '')} (disposable or public). Use a dedicated data directory and back it up.`);
+    }
+  }
+  return absolute;
+})();
 
 export function requireDatabaseUrl(): string {
   if (!env.DATABASE_URL) throw new Error('DATABASE_URL is not configured. Follow the local setup steps in README.md.');

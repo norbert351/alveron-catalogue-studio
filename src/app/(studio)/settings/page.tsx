@@ -6,6 +6,7 @@ import { checkDatabase } from '@/lib/db';
 import type { LucideIcon } from 'lucide-react';
 import { SettingsHealthCheck } from '@/components/settings-health-check';
 import { loadDurabilitySnapshot } from '@/lib/durability';
+import { generationQueueHealth } from '@/lib/generation/queue';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +18,8 @@ export default async function SettingsPage() {
   const database = await checkDatabase();
   const storageReady = env.STORAGE_PROVIDER === 'local' || Boolean(env.S3_BUCKET && env.S3_REGION);
   const durability = database ? await loadDurabilitySnapshot().catch(() => null) : null;
+  const queue = database ? await generationQueueHealth().catch(() => null) : null;
+  const providerConfigured = env.IMAGE_GENERATION_PROVIDER !== 'none';
   return <>
     <PageHeading eyebrow="Private studio · configuration" title="Studio settings" description="Review the local connections and safety gates. Credentials remain server-side and are never echoed into this page." />
     <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
@@ -24,7 +27,14 @@ export default async function SettingsPage() {
         <SettingRow icon={Database} title="PostgreSQL" detail="Private product, image, session and catalogue metadata." state={database ? 'Connected' : 'Unavailable'} ready={database} />
         <SettingRow icon={HardDrive} title="Private image storage" detail={env.STORAGE_PROVIDER === 'local' ? 'Persistent local filesystem under the configured data directory; back up .local-data/private with PostgreSQL.' : 'S3-compatible private bucket. Public ACLs are never requested.'} state={storageReady ? (env.STORAGE_PROVIDER === 'local' ? 'Local mode' : 'Configured') : 'Needs bucket settings'} ready={storageReady} />
         <SettingRow icon={KeyRound} title="Session signing secret" detail="Used to hash and validate server-side session tokens; value is never displayed." state={env.SESSION_SECRET && !env.SESSION_SECRET.startsWith('replace-') ? 'Configured' : 'Missing'} ready={Boolean(env.SESSION_SECRET && !env.SESSION_SECRET.startsWith('replace-'))} />
-        <SettingRow icon={Sparkles} title="Image generation" detail="No provider adapter is connected. Catalogue generation is disabled." state="Disabled · no provider" ready={false} />
+        <SettingRow icon={Sparkles} title="Image generation" detail={providerConfigured ? `Provider "${env.IMAGE_GENERATION_PROVIDER}" configured. Generation jobs are queued durably and claimed by the worker.` : 'No provider adapter is connected. Generation is disabled; the original-photo composition remains available.'} state={providerConfigured ? 'Configured' : 'Disabled · no provider'} ready={providerConfigured} />
+        {queue && <div className="border-b border-[#eee9e1] py-4">
+          <p className="text-[11px] font-medium">Generation job queue</p>
+          <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-6">
+            {([['Queued', queue.queued], ['Running', queue.running], ['Complete', queue.complete], ['Failed', queue.failed], ['Blocked', queue.blocked], ['Stale leases', queue.staleLeases]] as const).map(([label, value]) => <div key={label} className="border border-[#eee9e1] bg-[#faf9f6] px-2 py-2"><p className="text-[7px] uppercase tracking-[0.1em] text-[#938e86]">{label}</p><p className="mt-1 font-mono text-[12px] text-[#171717]">{value}</p></div>)}
+          </div>
+          <p className="mt-2 text-[9px] leading-relaxed text-[#938e86]">Jobs are stored in PostgreSQL with a lease. If a worker dies, its lease expires and the job returns to the queue automatically, so a restart does not lose queued work.{queue.staleLeases > 0 ? ' A stale lease will be recovered on the next worker tick.' : ''}</p>
+        </div>}
         <SettingRow icon={Check} title="Owner approval before export" detail="PNG, JPEG and PDF exports require an active approval for the exact output checksum and source revision. Nothing is published." state="Server enforced" ready />
         {durability && <div className="border-b border-[#eee9e1] py-5">
           <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-[11px] font-medium">Original photo durability</p><span className={`flex w-fit items-center gap-1.5 text-[8px] uppercase tracking-[0.12em] ${durability.failingIntegrity > 0 ? 'text-[#962a2e]' : 'text-[#477047]'}`}><span className={`size-1.5 rounded-full ${durability.failingIntegrity > 0 ? 'bg-[#b6222b]' : 'bg-[#62946a]'}`} />{durability.failingIntegrity > 0 ? `${durability.failingIntegrity} need attention` : 'Originals retained'}</span></div>

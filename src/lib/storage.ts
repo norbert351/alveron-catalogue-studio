@@ -1,6 +1,6 @@
 import 'server-only';
 import { DeleteObjectCommand, GetObjectCommand, HeadBucketCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { env } from './config';
+import { env, STORAGE_ROOT } from './config';
 import { readPrivateFile, removePrivateFile, storeImmutableFile } from './storage-files';
 import { mkdir, stat } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
@@ -14,7 +14,7 @@ export interface PrivateStorage {
 }
 
 class LocalPrivateStorage implements PrivateStorage {
-  private readonly root = env.LOCAL_STORAGE_DIR;
+  private readonly root = STORAGE_ROOT;
 
   async put(key: string, bytes: Buffer): Promise<void> {
     await storeImmutableFile(this.root, key, bytes);

@@ -6,6 +6,9 @@ import { rename } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import pg from 'pg';
 import sharp from 'sharp';
+// Resolve the private store exactly as the app does (absolute, cwd-independent),
+// so the restart/missing-object checks target the real directory.
+import { STORAGE_ROOT } from '../src/lib/config.ts';
 
 const port = Number(process.env.ALVERON_TEST_PORT ?? 3100);
 const base = `http://127.0.0.1:${port}`;
@@ -156,7 +159,7 @@ try {
   });
 
   const imageRow = await pool.query('SELECT object_key FROM product_images WHERE id=$1', [selectedFront.id]);
-  const absoluteImage = resolve(process.env.LOCAL_STORAGE_DIR, imageRow.rows[0].object_key);
+  const absoluteImage = resolve(STORAGE_ROOT, imageRow.rows[0].object_key);
   const missingPath = `${absoluteImage}.e2e-missing`;
   await rename(absoluteImage, missingPath);
   try {

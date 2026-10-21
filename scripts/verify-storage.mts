@@ -19,7 +19,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import pg from 'pg';
-import { env } from '../src/lib/config';
+import { env, STORAGE_ROOT } from '../src/lib/config';
 import { getPrivateStorage } from '../src/lib/storage';
 import { isSafeObjectKey } from '../src/lib/security-rules';
 
@@ -122,7 +122,7 @@ try {
 
   if (env.STORAGE_PROVIDER === 'local') {
     const referenced = new Set(refs.map((ref) => ref.object_key));
-    orphans = (await listLocalObjects(env.LOCAL_STORAGE_DIR))
+    orphans = (await listLocalObjects(STORAGE_ROOT))
       .filter((key) => !key.startsWith('healthchecks/'))
       .filter((key) => !referenced.has(key));
   }
