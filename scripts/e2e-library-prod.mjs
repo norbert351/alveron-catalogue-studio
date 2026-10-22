@@ -251,6 +251,24 @@ try {
     }
   });
 
+  await check('originals survive a MinIO restart', async () => {
+    const minioName = process.env.ALVERON_E2E_MINIO_NAME ?? 'alveron-library-minio';
+    if (!minioName) return;
+    execFileSync(process.env.PM2_BIN ?? 'pm2', ['restart', minioName], { stdio: 'ignore' });
+    const health = `${process.env.S3_ENDPOINT}/minio/health/live`;
+    let healthy = false;
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      try { if ((await fetch(health)).ok) { healthy = true; break; } } catch { /* restarting */ }
+      await delay(500);
+    }
+    assert.equal(healthy, true, 'MinIO must become healthy again');
+    for (const image of images) {
+      const response = await api(`/api/library/products/${productId}/images/${image.imageId}/original`, { headers: bearer });
+      assert.equal(response.status, 200, 'originals must still be readable after a storage restart');
+      assert.equal(sha(Buffer.from(await response.arrayBuffer())), image.sha256);
+    }
+  });
+
   await check('revocation takes effect on the next request', async () => {
     const revoke = await api(`/api/settings/tokens?id=${tokenId}`, { method: 'DELETE', headers: auth() });
     assert.equal(revoke.status, 200, await revoke.clone().text());

@@ -301,6 +301,20 @@ try {
     if (failed.rowCount) assert.equal(failed.rows[0].status, 'failed', 'the attempt must be recorded as failed, not silently dropped');
   });
 
+  await check('The end-to-end token is revoked when the run ends', async () => {
+    const active = (await pool.query(
+      "SELECT id FROM library_api_tokens WHERE label='E2E ChatGPT connector' AND revoked_at IS NULL ORDER BY created_at DESC",
+    )).rows;
+    for (const row of active) {
+      const revoked = await api(`/api/settings/tokens?id=${row.id}`, { method: 'DELETE', headers: auth() });
+      assert.equal(revoked.status, 200, await revoked.clone().text());
+    }
+    if (active.length) {
+      const refused = await api('/api/library/search', { headers: { Authorization: `Bearer ${token}` } });
+      assert.equal(refused.status, 401, 'a revoked token must stop working immediately');
+    }
+  });
+
   await check('Database and filesystem stay consistent', async () => {
     const rows = await pool.query('SELECT object_key, byte_size FROM product_images');
     for (const row of rows.rows) {
