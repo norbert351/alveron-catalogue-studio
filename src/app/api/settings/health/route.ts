@@ -4,6 +4,8 @@ import { env } from '@/lib/config';
 import { checkDatabase, getPool } from '@/lib/db';
 import { hasStudioAccess } from '@/lib/security-rules';
 import { getPrivateStorage } from '@/lib/storage';
+import { providerAvailability } from '@/lib/generation/provider';
+import { visionAvailability } from '@/lib/generation/vision';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,7 +26,15 @@ export async function GET() {
       uploads = uploadRows.rows[0]; jobs = jobRows.rows[0];
     } catch { /* Older schema; the screen reports migration status without leaking details. */ }
   }
-  return NextResponse.json({ database: database ? 'ready' : 'unavailable', storageProvider: env.STORAGE_PROVIDER, storage, uploads, jobs, generationProvider: 'none' }, { headers: { 'Cache-Control': 'private, no-store' }, status: database && storage === 'ready' ? 200 : 503 });
+  return NextResponse.json({
+    database: database ? 'ready' : 'unavailable',
+    storageProvider: env.STORAGE_PROVIDER,
+    storage,
+    uploads,
+    jobs,
+    generationProvider: providerAvailability(),
+    vision: visionAvailability(),
+  }, { headers: { 'Cache-Control': 'private, no-store' }, status: database && storage === 'ready' ? 200 : 503 });
 }
 
 export async function POST(request: Request) {

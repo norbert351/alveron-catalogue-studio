@@ -7,6 +7,8 @@ import type { LucideIcon } from 'lucide-react';
 import { SettingsHealthCheck } from '@/components/settings-health-check';
 import { loadDurabilitySnapshot } from '@/lib/durability';
 import { generationQueueHealth } from '@/lib/generation/queue';
+import { IMAGE_PROVIDERS, providerAvailability } from '@/lib/generation/provider';
+import { visionAvailability } from '@/lib/generation/vision';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +21,9 @@ export default async function SettingsPage() {
   const storageReady = env.STORAGE_PROVIDER === 'local' || Boolean(env.S3_BUCKET && env.S3_REGION);
   const durability = database ? await loadDurabilitySnapshot().catch(() => null) : null;
   const queue = database ? await generationQueueHealth().catch(() => null) : null;
-  const providerConfigured = env.IMAGE_GENERATION_PROVIDER !== 'none';
+  const provider = providerAvailability();
+  const vision = visionAvailability();
+  const providerConfigured = provider.configured;
   return <>
     <PageHeading eyebrow="Private studio · configuration" title="Studio settings" description="Review the local connections and safety gates. Credentials remain server-side and are never echoed into this page." />
     <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
@@ -27,7 +31,22 @@ export default async function SettingsPage() {
         <SettingRow icon={Database} title="PostgreSQL" detail="Private product, image, session and catalogue metadata." state={database ? 'Connected' : 'Unavailable'} ready={database} />
         <SettingRow icon={HardDrive} title="Private image storage" detail={env.STORAGE_PROVIDER === 'local' ? 'Persistent local filesystem under the configured data directory; back up .local-data/private with PostgreSQL.' : 'S3-compatible private bucket. Public ACLs are never requested.'} state={storageReady ? (env.STORAGE_PROVIDER === 'local' ? 'Local mode' : 'Configured') : 'Needs bucket settings'} ready={storageReady} />
         <SettingRow icon={KeyRound} title="Session signing secret" detail="Used to hash and validate server-side session tokens; value is never displayed." state={env.SESSION_SECRET && !env.SESSION_SECRET.startsWith('replace-') ? 'Configured' : 'Missing'} ready={Boolean(env.SESSION_SECRET && !env.SESSION_SECRET.startsWith('replace-'))} />
-        <SettingRow icon={Sparkles} title="Image generation" detail={providerConfigured ? `Provider "${env.IMAGE_GENERATION_PROVIDER}" configured. Generation jobs are queued durably and claimed by the worker.` : 'No provider adapter is connected. Generation is disabled; the original-photo composition remains available.'} state={providerConfigured ? 'Configured' : 'Disabled · no provider'} ready={providerConfigured} />
+        <SettingRow icon={Sparkles} title="Image generation" detail={providerConfigured ? `Provider "${provider.id}" (${provider.model}) is connected. Source product images are sent as reference bytes; outputs are stored privately and measured for fidelity.` : (provider.reason ?? 'No provider adapter is connected. Generation is disabled; the original-photo composition remains available.')} state={providerConfigured ? `Connected · ${provider.model}` : 'Disabled'} ready={providerConfigured} />
+        <SettingRow icon={Sparkles} title="Vision review (Qwen)" detail={vision.configured ? `${vision.model} reads real product photos to record visible garment details and to measure what a generated image preserved. Understanding only — it never generates images.` : (vision.reason ?? 'Not configured.')} state={vision.configured ? 'Connected · understanding only' : 'Manual review only'} ready={vision.configured} />
+        {providerConfigured && <div className="border-b border-[#eee9e1] py-4">
+          <p className="text-[11px] font-medium">Available providers</p>
+          <div className="mt-3 space-y-2">
+            {IMAGE_PROVIDERS.map((entry) => <div key={entry.id} className="border border-[#eee9e1] bg-[#faf9f6] px-3 py-2">
+              <div className="flex flex-wrap items-center justify-between gap-1">
+                <p className="text-[10px] font-medium">{entry.label}{entry.id === provider.id ? ' · active' : ''}</p>
+                <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-[#938e86]">{entry.supportsReference ? 'reference image' : 'text only'}</span>
+              </div>
+              <p className="mt-1 text-[8px] leading-relaxed text-[#938e86]">{entry.source} · {entry.model}</p>
+              <p className="mt-1 text-[8px] leading-relaxed text-[#938e86]">Capability: {entry.tested}</p>
+            </div>)}
+          </div>
+          <p className="mt-2 text-[9px] leading-relaxed text-[#938e86]">Providers are listed only after a real request against a real product photo. A vision model (understanding) is never listed as a generator: those endpoints return 404 on image generation.</p>
+        </div>}
         {queue && <div className="border-b border-[#eee9e1] py-4">
           <p className="text-[11px] font-medium">Generation job queue</p>
           <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-6">
