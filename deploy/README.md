@@ -27,7 +27,7 @@ Recorded verification against this deployment:
 |---|---|
 | `npm test` | 37/37 |
 | `npm run test:library` (local-storage suite) | 17/17 |
-| `npm run test:library:prod` (real MinIO; restarts app and MinIO) | 17/17 |
+| `npm run test:library:prod` (real MinIO; restarts app and MinIO) | 18/18 |
 | `npm run test:mcp:prod` (stdio MCP returns real image bytes) | 5/5 |
 | `./deploy/backup.sh` + restore into a scratch database | dump checksum valid; 7 migrations restored |
 | Anonymous MinIO list/get | `403` |
