@@ -6,6 +6,47 @@ Target: `library.alveronfashion.com` → nginx (TLS) → `127.0.0.1:3001` (Next.
 Nothing binds a public interface except nginx on 80/443 (the existing firewall
 already allows those). MinIO, PostgreSQL and the app listen on loopback only.
 
+## Deployment status (2026-10-22)
+
+The application is deployed and verified on loopback. Public HTTPS is the only
+remaining step and it needs root (see §5); the `deploy` account has no
+passwordless sudo.
+
+| Component | State |
+|---|---|
+| App `127.0.0.1:3001` | online under PM2 (`alveron-library`); `/api/status` reports database + storage ready |
+| PostgreSQL 18.6 | container `alveron-library-postgres`, `127.0.0.1:55432`, 7 migrations applied |
+| MinIO `RELEASE.2025-09-07T16-13-09Z` | `127.0.0.1:9000`; private bucket `alveron-library`; anonymous list/get return `403` |
+| HTTPS vhost | **not installed** — needs the sudo steps in §5 |
+| Owner login | works; password only in `.owner-credentials.txt` (mode 600) |
+| `AUTH_BOOTSTRAP_*` | removed from `.env.local` after bootstrap; the login code stays |
+
+Recorded verification against this deployment:
+
+| Check | Result |
+|---|---|
+| `npm test` | 37/37 |
+| `npm run test:library` (local-storage suite) | 17/17 |
+| `npm run test:library:prod` (real MinIO; restarts app and MinIO) | 17/17 |
+| `npm run test:mcp:prod` (stdio MCP returns real image bytes) | 5/5 |
+| `./deploy/backup.sh` + restore into a scratch database | dump checksum valid; 7 migrations restored |
+| Anonymous MinIO list/get | `403` |
+| Token or signed-URL leakage in PM2 logs | none found |
+
+Not yet run: an actual ChatGPT round-trip. It needs public HTTPS plus the
+ChatGPT-side setup in `docs/LIBRARY.md`. Hosted ChatGPT connectors authenticate
+with OAuth 2.1 and cannot present the `alv_lib_…` bearer; GPT Actions can use
+the bearer but are text-only (no images).
+
+The suites read `AUTH_BOOTSTRAP_*`, which are no longer in `.env.local`. To
+re-run them, load the owner credentials without echoing them:
+
+```bash
+IFS= read -r AUTH_BOOTSTRAP_EMAIL < <(sed -n 1p .owner-credentials.txt)
+IFS= read -r AUTH_BOOTSTRAP_PASSWORD < <(sed -n 2p .owner-credentials.txt)
+export AUTH_BOOTSTRAP_EMAIL AUTH_BOOTSTRAP_PASSWORD
+```
+
 ## Why a pinned MinIO binary, not a container
 
 MinIO Community Edition is no longer distributed as a Docker image or prebuilt
@@ -57,8 +98,9 @@ npm run db:bootstrap
 
 `db:bootstrap` is one-time and refuses if an owner already exists. After it
 succeeds and you have logged in once, delete the three `AUTH_BOOTSTRAP_*` lines
-from `.env.local` (see `docs/LIBRARY.md`). Do **not** delete the login code: it
-protects uploads, edits, deletes and token management.
+from `.env.local` (see `docs/LIBRARY.md`). This has been done on this host. Do
+**not** delete the login code: it protects uploads, edits, deletes and token
+management.
 
 ## 3. MinIO
 
@@ -89,7 +131,10 @@ use the MinIO S3 endpoint.
 
 ## 5. HTTPS (requires your sudo password — not run by the agent)
 
+This is the only remaining step. Run it from `/var/www/alveron-library`:
+
 ```bash
+cd /var/www/alveron-library
 sudo cp deploy/nginx/limits.conf /etc/nginx/conf.d/alveron-library-limits.conf
 sudo cp deploy/nginx/alveron-library.bootstrap.conf /etc/nginx/sites-available/alveron-library
 sudo ln -sf ../sites-available/alveron-library /etc/nginx/sites-enabled/alveron-library
@@ -117,18 +162,22 @@ Each run produces `database.dump` (pg_dump custom format) plus `minio/` (a
 mirror of the private bucket) and SHA-256 manifests. Copy the directory off the
 VPS; a backup on the same disk is not a backup.
 
-Restore (destructive — verify the dump first):
+Restore (destructive — verify the dump first; stop the app so it cannot read a
+half-restored database):
 
 ```bash
+pm2 stop alveron-library
 docker exec -i alveron-library-postgres pg_restore \
   -U catalogue -d alveron_catalogue --clean --if-exists < database.dump
 ./bin/mc alias set restore http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
 ./bin/mc mirror --overwrite minio/ restore/alveron-library
 ```
 
-Then run `npm run storage:verify` and `curl` the original route for a known
-image; the route re-hashes and returns 503 if the restored bytes do not match
-the database checksums.
+Then `pm2 start alveron-library`, run `npm run storage:verify`, and `curl` the
+original route for a known image; the route re-hashes and returns 503 if the
+restored bytes do not match the database checksums. A non-destructive rehearsal
+is also possible: `createdb restore_check`, `pg_restore` into it, inspect, then
+`dropdb restore_check` (this was done successfully on 2026-10-22).
 
 ## 7. Rollback
 
