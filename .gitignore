@@ -49,3 +49,10 @@ next-env.d.ts
 .local-data-gen-clean/
 .fidelity-report/
 .local-data-lib-clean/
+
+# Deployment runtime state (never commit)
+/bin/
+/data/
+/logs/
+/backups/
+.owner-credentials.txt
