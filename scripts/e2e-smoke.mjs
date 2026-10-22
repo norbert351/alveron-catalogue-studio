@@ -121,9 +121,21 @@ try {
     assert.equal(mixed.status, 400);
   });
 
-  const blocked = await api(`/api/catalogues/${catalogueId}/generate`, { method: 'POST', headers: headers(cookie, { Origin: base, 'Idempotency-Key': 'e2e-provider-not-configured' }) });
-  assert.equal(blocked.status, 503); const blockedJob = await blocked.json(); assert.equal(blockedJob.status, 'blocked');
-  const blockedRetry = await api(`/api/catalogues/${catalogueId}/generate`, { method: 'POST', headers: headers(cookie, { Origin: base, 'Idempotency-Key': 'e2e-provider-not-configured' }) });
+  // This assertion must reflect the ACTUAL provider configuration rather than assume
+  // none is wired. With no provider, generation is blocked (503) and repeatable via
+  // the same idempotency key. With a real provider, the request is accepted (202) and
+  // the inline worker either completes it or records a retryable failure.
+  const providerConfigured = process.env.IMAGE_GENERATION_PROVIDER && process.env.IMAGE_GENERATION_PROVIDER !== 'none' && Boolean(process.env.FAL_KEY);
+  const blocked = await api(`/api/catalogues/${catalogueId}/generate`, { method: 'POST', headers: headers(cookie, { Origin: base, 'Idempotency-Key': 'e2e-provider-state' }) });
+  const blockedJob = await blocked.json();
+  if (providerConfigured) {
+    assert.equal(blocked.status, 202, JSON.stringify(blockedJob));
+    assert.equal(blockedJob.status, 'queued');
+    assert.ok(['complete', 'retry', 'failed', 'queued'].includes(blockedJob.outcome?.outcome ?? 'queued'), JSON.stringify(blockedJob.outcome));
+  } else {
+    assert.equal(blocked.status, 503); assert.equal(blockedJob.status, 'blocked');
+  }
+  const blockedRetry = await api(`/api/catalogues/${catalogueId}/generate`, { method: 'POST', headers: headers(cookie, { Origin: base, 'Idempotency-Key': 'e2e-provider-state' }) });
   assert.equal(blockedRetry.status, 200); assert.equal((await blockedRetry.json()).jobId, blockedJob.jobId);
 
   const compose = await api(`/api/catalogues/${catalogueId}/compose`, { method: 'POST', headers: headers(cookie, { Origin: base }) });
