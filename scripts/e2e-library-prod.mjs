@@ -149,6 +149,18 @@ try {
     assert.ok(!item.primaryImage.signedOriginalUrl.includes('alv_lib_'));
   });
 
+  await check('public origin is built from the reverse-proxy headers', async () => {
+    const response = await api('/api/library/search?q=Production', {
+      headers: { ...bearer, 'X-Forwarded-Proto': 'https', 'X-Forwarded-Host': 'library.alveronfashion.com' },
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    const item = body.products.find((candidate) => candidate.id === productId);
+    assert.ok(item);
+    assert.match(item.primaryImage.originalUrl, /^https:\/\/library\.alveronfashion\.com\/api\/library\//);
+    assert.match(item.primaryImage.signedOriginalUrl, /^https:\/\/library\.alveronfashion\.com\/api\/library\/.+\?exp=\d+&sig=[0-9a-f]{64}$/);
+  });
+
   const product = await (await api(`/api/library/products/${productId}`, { headers: bearer })).json();
   const images = [...product.images].sort((a, b) => a.filename.localeCompare(b.filename));
   assert.equal(images.length, 3);
