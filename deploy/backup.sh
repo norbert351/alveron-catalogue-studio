@@ -15,7 +15,7 @@ docker exec alveron-library-postgres \
   pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc > "$DEST/database.dump"
 
 "$ROOT/bin/mc" alias set backup http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
-"$ROOT/bin/mc" mirror --quiet --overwrite "backup/$MINIO_BUCKET" "$DEST/minio"
+"$ROOT/bin/mc" mirror --quiet --overwrite "backup/$MINIO_BUCKET" "$DEST/minio" >/dev/null
 
 sha256sum "$DEST/database.dump" > "$DEST/database.dump.sha256"
 ( cd "$DEST/minio" && find . -type f -print0 | sort -z | xargs -0 -r sha256sum ) > "$DEST/minio.sha256"
