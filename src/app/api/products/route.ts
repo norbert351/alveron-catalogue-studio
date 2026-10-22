@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 import { getCurrentUser, isSameOrigin } from '@/lib/auth';
 import { hasStudioAccess } from '@/lib/security-rules';
 import { getPool } from '@/lib/db';
@@ -170,5 +171,44 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message.includes('duplicate key') ? 'That SKU is already in the library.' : storedKeys.length ? 'Product upload needs recovery. The original objects are preserved and recorded for storage recovery; do not retry with the same idempotency key.' : 'Product could not be saved. Check storage and database configuration.' }, { status: 503 });
   } finally {
     client.release();
+  }
+}
+
+/**
+ * DELETE /api/products — bulk delete.
+ *
+ * Body: { ids: string[] } (1..100). Used by the library's multi-select delete.
+ * Same authorisation as the single delete; a read-only token is refused.
+ *
+ * Returns per-id accounting so a partial result is visible: `deleted` lists what
+ * went, `notFound` what was already gone, and `objectsFailed` any file that
+ * could not be removed from storage.
+ */
+export async function DELETE(request: Request) {
+  const user = await getCurrentUser();
+  if (!hasStudioAccess(user)) return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
+  if (!isSameOrigin(request)) return NextResponse.json({ error: 'Request origin could not be verified.' }, { status: 403 });
+
+  let payload: unknown;
+  try { payload = await request.json(); } catch { return NextResponse.json({ error: 'Send JSON: {"ids": ["<uuid>", ...]}' }, { status: 400 }); }
+  const parsed = z.object({ ids: z.array(z.uuid()).min(1).max(100) }).safeParse(payload);
+  if (!parsed.success) return NextResponse.json({ error: 'Select between 1 and 100 products to delete.' }, { status: 400 });
+
+  const { deleteProducts } = await import('@/lib/product-deletion');
+  try {
+    const result = await deleteProducts(parsed.data.ids);
+    await getPool().query(
+      `INSERT INTO audit_events (actor_id, action, entity_type, entity_id, detail) VALUES ($1,'product.bulk_deleted','product',NULL,$2)`,
+      [user!.id, JSON.stringify({ requested: parsed.data.ids.length, deleted: result.deletedProducts.length, objectsRemoved: result.objectsRemoved, objectsFailed: result.objectsFailed.length })],
+    ).catch(() => undefined);
+    return NextResponse.json({
+      requested: parsed.data.ids.length,
+      deleted: result.deletedProducts,
+      notFound: result.notFound,
+      objectsRemoved: result.objectsRemoved,
+      objectsFailed: result.objectsFailed,
+    }, { status: 200, headers: { 'Cache-Control': 'no-store' } });
+  } catch (error) {
+    return NextResponse.json({ error: `Bulk delete failed: ${(error as Error).message.slice(0, 200)}` }, { status: 409 });
   }
 }

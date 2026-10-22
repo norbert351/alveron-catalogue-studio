@@ -9,15 +9,12 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "node --conditions=react-server --env-file-if-exists=.env.local --test --import tsx tests/*.test.ts",
-    "test:e2e": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/e2e-smoke.mjs",
     "db:migrate": "node --env-file-if-exists=.env.local scripts/migrate.mjs",
     "db:bootstrap": "node --env-file-if-exists=.env.local scripts/bootstrap-owner.mjs",
     "storage:migrate": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/migrate-storage.mts",
     "storage:verify": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/verify-storage.mts",
     "storage:root": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/check-storage-root.mts",
-    "generation:worker": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/generation-worker.mts",
-    "test:generation": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/e2e-generation.mjs",
-    "fidelity:report": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/fidelity-report.mts"
+    "test:library": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/e2e-library.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1153.0",

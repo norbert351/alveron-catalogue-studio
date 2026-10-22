@@ -47,3 +47,4 @@ next-env.d.ts
 # Test-run outputs and private fidelity reports (contain real generated product imagery)
 .local-data-gen-clean/
 .fidelity-report/
+.local-data-lib-clean/

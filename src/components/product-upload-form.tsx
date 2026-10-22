@@ -3,9 +3,13 @@
 import { useState } from 'react';
 import { ImagePlus, LoaderCircle, Upload } from 'lucide-react';
 
+/** Specific garment types first: that is how the owner describes her stock. */
 const categories = [
-  ['tops', 'Tops'], ['bottoms', 'Bottoms'], ['outerwear', 'Outerwear'], ['shoes', 'Shoes'],
-  ['accessories', 'Accessories'], ['sets', 'Sets'], ['other', 'Other'],
+  ['t-shirt', 'T-shirt'], ['shirt', 'Shirt'], ['jeans', 'Jeans'], ['trousers', 'Trousers'],
+  ['shorts', 'Shorts'], ['footwear', 'Footwear'], ['jacket', 'Jacket'], ['accessory', 'Accessory'],
+  ['dress', 'Dress'], ['skirt', 'Skirt'], ['bag', 'Bag'], ['hat', 'Hat'],
+  ['tops', 'Tops (general)'], ['bottoms', 'Bottoms (general)'], ['outerwear', 'Outerwear'],
+  ['shoes', 'Shoes (general)'], ['accessories', 'Accessories (general)'], ['sets', 'Sets'], ['other', 'Other'],
 ];
 
 export function ProductUploadForm() {

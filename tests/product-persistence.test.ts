@@ -19,7 +19,6 @@ import sharp from 'sharp';
 import { storeImmutableFile, readPrivateFile, removePrivateFile } from '../src/lib/storage-files';
 import { isSafeObjectKey } from '../src/lib/security-rules';
 import { buildPage, parsePageRequest, pageOffset } from '../src/lib/pagination';
-import { isApprovalCurrent } from '../src/lib/approval-rules';
 
 const connectionString = process.env.DATABASE_URL;
 const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
@@ -49,15 +48,6 @@ test('pagination clamps bad input instead of failing or requesting negative offs
   assert.equal(parsePageRequest({ pageSize: '100000' }).pageSize, 100);
   assert.ok(pageOffset({ page: 1, pageSize: 10 }) === 0);
   assert.ok(pageOffset({ page: -3, pageSize: 10 }) === 0);
-});
-
-test('approval is only current for the exact checksum and revision', () => {
-  const base = { catalogueStatus: 'approved', catalogueRevision: 4, approvedRevision: 4, approvalChecksum: 'a'.repeat(64), outputChecksum: 'a'.repeat(64), invalidatedAt: null };
-  assert.equal(isApprovalCurrent(base), true);
-  assert.equal(isApprovalCurrent({ ...base, outputChecksum: 'b'.repeat(64) }), false, 'changed output must invalidate');
-  assert.equal(isApprovalCurrent({ ...base, catalogueRevision: 5 }), false, 'newer revision must invalidate');
-  assert.equal(isApprovalCurrent({ ...base, invalidatedAt: new Date() }), false, 'explicit invalidation must win');
-  assert.equal(isApprovalCurrent({ ...base, catalogueStatus: 'review' }), false, 'unapproved status cannot export');
 });
 
 test('writes are byte-identical to the checksum recorded at upload time', async () => {

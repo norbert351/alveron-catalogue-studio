@@ -1,7 +1,7 @@
 import { Boxes, Images, ShieldCheck } from 'lucide-react';
 import { PageHeading } from '@/components/page-heading';
 import { ProductUploadForm } from '@/components/product-upload-form';
-import { ProductImageReview } from '@/components/product-image-review';
+import { ProductImageTile } from '@/components/product-image-tile';
 import { ProductManagementControls } from '@/components/product-management-controls';
 import { ProductLibraryFilters } from '@/components/product-library-filters';
 import { ProductImageUpload } from '@/components/product-image-upload';
@@ -50,7 +50,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
           <div><div className="flex items-center gap-2"><h2 className="text-[14px] font-semibold">{product.name}</h2>{product.sku && <span className="text-[9px] text-[#938e86]">SKU {product.sku}</span>}</div><p className="mt-1 text-[10px] capitalize text-[#77736d]">{product.category} · {product.color || 'Colour unverified'}{product.fabric ? ` · ${product.fabric}` : ''}</p>{product.tags.length > 0 && <p className="mt-2 text-[9px] text-[#938e86]">Tags: {product.tags.join(', ')}</p>}{product.notes && <p className="mt-2 max-w-2xl text-[10px] leading-relaxed text-[#77736d]">{product.notes}</p>}<ProductManagementControls product={product} /></div>
           <span className="w-fit border border-[#e2ddd5] px-2 py-1 text-[8px] uppercase tracking-[0.12em] text-[#77736d]">{product.images.length} {product.images.length === 1 ? 'view' : 'views'}</span>
         </div>
-        {product.images.length ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">{product.images.map((image) => <ProductImageReview key={image.id} productId={product.id} imageId={image.id} width={image.width} height={image.height} label={image.view_label} initialReviewed={image.reviewed} filename={image.original_filename} mediaType={image.media_type} byteSize={image.byte_size} sha256={image.sha256} createdAt={image.created_at} current={image.current} hasThumbnail={image.has_thumbnail} />)}</div> : <p className="border border-dashed border-[#ded8cf] p-5 text-[10px] text-[#938e86]">This product has no accessible image views and cannot be selected for a catalogue.</p>}
+        {product.images.length ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">{product.images.map((image) => <ProductImageTile key={image.id} productId={product.id} imageId={image.id} width={image.width} height={image.height} label={image.view_label} filename={image.original_filename} mediaType={image.media_type} byteSize={image.byte_size} sha256={image.sha256} hasThumbnail={image.has_thumbnail} />)}</div> : <p className="border border-dashed border-[#ded8cf] p-5 text-[10px] text-[#938e86]">This product has no viewable image.</p>}
         <ProductImageUpload product={product} />
       </section>)}
       <Pagination page={paging.page} totalPages={totalPages} total={total} pageSize={paging.pageSize} query={{ search: filters.search, category: filters.category, availability: filters.availability, uploadedFrom: filters.uploadedFrom, uploadedThrough: filters.uploadedThrough }} />

@@ -1,6 +1,17 @@
 import { z } from 'zod';
 
-export const PRODUCT_CATEGORIES = ['tops', 'bottoms', 'outerwear', 'shoes', 'accessories', 'sets', 'other'] as const;
+/**
+ * Categories the owner can pick, in the words they use for their own stock.
+ *
+ * The coarse buckets (tops/bottoms/...) are retained because existing records use
+ * them; the specific garment types are what the library actually needs so that
+ * "shirt" and "jacket" are separable when filtering or styling.
+ */
+export const PRODUCT_CATEGORIES = [
+  't-shirt', 'shirt', 'jeans', 'trousers', 'shorts', 'footwear', 'jacket', 'accessory',
+  'dress', 'skirt', 'bag', 'hat',
+  'tops', 'bottoms', 'outerwear', 'shoes', 'accessories', 'sets', 'other',
+] as const;
 export const productInputSchema = z.object({
   name: z.string().trim().min(2).max(100),
   sku: z.string().trim().max(60).optional().transform((value) => value || null),

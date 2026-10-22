@@ -17,7 +17,7 @@ export function LoginForm() {
       const response = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: form.get('email'), password: form.get('password') }) });
       const result = await response.json() as { error?: string };
       if (!response.ok) setError(result.error ?? 'Sign-in failed.');
-      else { router.replace('/dashboard'); router.refresh(); }
+      else { router.replace('/products'); router.refresh(); }
     } catch { setError('The studio could not be reached. Check your local server.'); }
     finally { setBusy(false); }
   }}>

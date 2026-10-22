@@ -16,15 +16,6 @@ const configSchema = z.object({
   S3_ACCESS_KEY_ID: optionalString,
   S3_SECRET_ACCESS_KEY: optionalString,
   S3_FORCE_PATH_STYLE: z.enum(['true', 'false']).default('false'),
-  IMAGE_GENERATION_PROVIDER: z.string().default('none'),
-  /** FAL API key. Server-side only; never echoed into the settings page. */
-  FAL_KEY: optionalString,
-  /** How long the adapter waits for a queued generation to finish. */
-  IMAGE_GENERATION_TIMEOUT_SECONDS: z.string().default('180'),
-  /** Qwen vision endpoint used for attribute extraction and fidelity review. */
-  QWEN_VISION_BASE_URL: z.string().default('https://hackathon.bitgetops.com/v1'),
-  QWEN_VISION_MODEL: z.string().default('qwen3.8-max'),
-  QWEN_VISION_API_KEY: optionalString,
 });
 
 export const env = configSchema.parse(process.env);
