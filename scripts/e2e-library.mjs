@@ -25,6 +25,7 @@ import sharp from 'sharp';
 import { STORAGE_ROOT } from '../src/lib/config.ts';
 
 const port = Number(process.env.ALVERON_TEST_PORT ?? 3103);
+const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const base = `http://127.0.0.1:${port}`;
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 let server; let cookie; let passed = 0;
@@ -107,7 +108,7 @@ try {
       { bytes: await garment(3, '#4a4a2f'), name: 'olive-shirt.png' },
     ];
     const created = await api('/api/products', {
-      method: 'POST', headers: auth({ 'Idempotency-Key': 'lib-multi-1' }),
+      method: 'POST', headers: auth({ 'Idempotency-Key': `lib-multi-${runId}` }),
       body: form([['name', 'Triple Shirt Set'], ['category', 'shirt'], ['color', 'assorted'], ['tags', 'e2e,multi']], files),
     });
     const body = await created.json();
@@ -122,7 +123,7 @@ try {
 
   await check('A second product with metadata for search/filter', async () => {
     const created = await api('/api/products', {
-      method: 'POST', headers: auth({ 'Idempotency-Key': 'lib-single-1' }),
+      method: 'POST', headers: auth({ 'Idempotency-Key': `lib-single-${runId}` }),
       body: form([['name', 'Linen Trousers'], ['category', 'trousers'], ['color', 'sand'], ['tags', 'e2e,summer'], ['notes', 'wide leg']], [{ bytes: await garment(4, '#d8c9a3'), name: 'linen-trousers.png' }]),
     });
     const body = await created.json();
@@ -293,11 +294,11 @@ try {
     // An empty file must be rejected by validation.
     bad.append('images', new Blob([Buffer.alloc(0)], { type: 'image/png' }), 'empty.png');
     bad.append('viewLabels', 'front');
-    const response = await api('/api/products', { method: 'POST', headers: auth({ 'Idempotency-Key': 'lib-bad-1' }), body: bad });
+    const response = await api('/api/products', { method: 'POST', headers: auth({ 'Idempotency-Key': `lib-bad-${runId}` }), body: bad });
     assert.ok(![200, 201].includes(response.status), 'an empty file must be rejected');
     const after = (await pool.query('SELECT count(*)::int AS n FROM products')).rows[0].n;
     assert.equal(after, before, 'a rejected upload must not create a product row');
-    const failed = await pool.query("SELECT status FROM product_upload_requests WHERE idempotency_key='lib-bad-1'");
+    const failed = await pool.query('SELECT status FROM product_upload_requests WHERE idempotency_key=$1', [`lib-bad-${runId}`]);
     if (failed.rowCount) assert.equal(failed.rows[0].status, 'failed', 'the attempt must be recorded as failed, not silently dropped');
   });
 
