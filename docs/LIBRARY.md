@@ -66,14 +66,19 @@ hash is kept. The token:
 
 ### Step C — connect ChatGPT
 
-In ChatGPT, add a custom connector / action pointing at your HTTPS base URL and
-send the header:
+Use a **Custom GPT Action**, not a connector:
 
-```
-Authorization: Bearer alv_lib_…
-```
+- ChatGPT connectors/MCP apps authenticate with OAuth 2.1 only; OpenAI documents
+  that ChatGPT cannot present a custom API key. The `alv_lib_…` token therefore
+  cannot be used by a hosted connector.
+- GPT Actions are the only ChatGPT surface that accepts a static bearer token:
+  **Authentication → API Key → Bearer**, value `alv_lib_…`.
+- GPT Actions are **text-only** — they cannot receive image or video bytes and
+  cannot render an image. Ask the model for the product metadata and the
+  `signedOriginalUrl`/`originalUrl`, then open that link yourself to see the
+  exact original. True image content in a model requires the MCP bridge below.
 
-Point ChatGPT at the four endpoints below. A minimal OpenAPI description follows.
+Point the Action at the four endpoints below. A minimal OpenAPI description follows.
 
 ### The API
 
@@ -90,6 +95,36 @@ variants and multiple views apart.
 
 Original bytes are re-hashed on every read and compared to the checksum recorded
 at upload. A mismatch returns 503 rather than serving an unverified file.
+
+### Signed original URLs (optional)
+
+A browser click or an image fetcher cannot send `Authorization: Bearer`. With
+`LIBRARY_SIGNING_SECRET` set, responses also include a `signedOriginalUrl`:
+
+```
+…/original?exp=<unix-seconds>&sig=<hmac-sha256>
+```
+
+- default lifetime 10 minutes, maximum 1 hour;
+- bound to one product id + image id, so a link cannot be replayed elsewhere;
+- accepted only by the original-image route, and only when no `Authorization`
+  header was sent (bearer auth is unchanged and takes precedence);
+- expired, malformed or tampered links get `403`; the secret never appears in a
+  response or a log.
+
+Rotating `LIBRARY_SIGNING_SECRET` invalidates every outstanding link.
+
+### MCP bridge (image content for vision-capable clients)
+
+`mcp/` is a read-only stdio MCP server with three tools: `search_products`,
+`get_product` and `get_original_image`. It calls this HTTP API, keeps the bearer
+token in its own environment, verifies the SHA-256 of every image it returns and
+emits an MCP image content block. See `mcp/README.md`.
+
+Because ChatGPT cannot supply the bearer token to an MCP connector, the bridge is
+for local/trusted MCP clients (Claude Desktop, Codex, IDE agents) and for an
+API-side Responses integration — not for a ChatGPT-hosted connector. Do not
+expose it on a public port.
 
 ### Minimal OpenAPI for the ChatGPT connector
 
@@ -162,6 +197,6 @@ access refused, token auth (search, originals, batch, missing ids, no mutation),
 single and bulk delete with file cleanup, failed-upload recovery, and
 database/filesystem consistency.
 
-**Not verified:** an actual ChatGPT connector round-trip. That requires a public
-HTTPS URL and configuration inside ChatGPT, which cannot be done from this
-repository. Everything on the server side of that connection is tested.
+**Not verified:** an actual ChatGPT round-trip. That requires the public HTTPS
+URL and configuration inside ChatGPT, which cannot be done from this repository.
+Everything on the server side of that connection is tested.

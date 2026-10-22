@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getPool } from '@/lib/db';
-import { authenticateToken } from '@/lib/library-token';
+import { authenticateToken, bearerFrom } from '@/lib/library-token';
+import { verifyOriginalSignature } from '@/lib/library-signing';
 import { env } from '@/lib/config';
 import { getPrivateStorage } from '@/lib/storage';
 
@@ -22,13 +23,39 @@ export const dynamic = 'force-dynamic';
  * poison any styling decision made from it.
  */
 export async function GET(request: Request, context: { params: Promise<{ productId: string; imageId: string }> }) {
-  const token = await authenticateToken(request);
-  if (!token) {
-    return NextResponse.json({ error: 'A valid library token is required.' }, { status: 401 });
-  }
   const { productId, imageId } = await context.params;
   if (!z.uuid().safeParse(productId).success || !z.uuid().safeParse(imageId).success) {
     return NextResponse.json({ error: 'That is not a valid product or image id.' }, { status: 400 });
+  }
+
+  // Accept EITHER a bearer token (machine clients) OR a valid short-lived
+  // signature (browser clicks, image fetchers). A signature is only consulted
+  // when no Authorization header was sent, so a bad token never silently
+  // downgrades to link auth.
+  const hasBearer = bearerFrom(request) !== null;
+  const token = hasBearer ? await authenticateToken(request) : null;
+  let authorized = token !== null;
+  if (!authorized && !hasBearer) {
+    const verdict = verifyOriginalSignature({
+      productId,
+      imageId,
+      exp: new URL(request.url).searchParams.get('exp'),
+      sig: new URL(request.url).searchParams.get('sig'),
+    });
+    if (verdict === 'valid') {
+      authorized = true;
+    } else if (verdict !== 'missing') {
+      return NextResponse.json(
+        { error: verdict === 'expired' ? 'This image link has expired.' : 'This image link is invalid.' },
+        { status: 403, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
+  }
+  if (!authorized) {
+    return NextResponse.json(
+      { error: 'A valid library token is required.' },
+      { status: 401, headers: { 'WWW-Authenticate': 'Bearer realm="alveron-library"' } },
+    );
   }
 
   const result = await getPool().query<{

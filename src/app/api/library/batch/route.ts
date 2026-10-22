@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getPool } from '@/lib/db';
 import { authenticateToken } from '@/lib/library-token';
+import { signedOriginalUrl as signOriginalUrl } from '@/lib/library-signing';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -83,17 +84,21 @@ export async function POST(request: Request) {
       uploadedAt: row.created_at,
       images: images.rows
         .filter((image) => image.product_id === row.id)
-        .map((image) => ({
-          imageId: image.id,
-          filename: image.original_filename,
-          mediaType: image.media_type,
-          byteSize: Number(image.byte_size),
-          sha256: image.sha256,
-          width: image.width,
-          height: image.height,
-          viewLabel: image.view_label,
-          originalUrl: `${origin}/api/library/products/${row.id}/images/${image.id}/original`,
-        })),
+        .map((image) => {
+          const signed = signOriginalUrl(origin, row.id, image.id);
+          return {
+            imageId: image.id,
+            filename: image.original_filename,
+            mediaType: image.media_type,
+            byteSize: Number(image.byte_size),
+            sha256: image.sha256,
+            width: image.width,
+            height: image.height,
+            viewLabel: image.view_label,
+            originalUrl: `${origin}/api/library/products/${row.id}/images/${image.id}/original`,
+            ...(signed ? { signedOriginalUrl: signed } : {}),
+          };
+        }),
     })),
     note: missing.length
       ? `${missing.length} requested id(s) are not in the library. Report them as unavailable; do not substitute generated images.`

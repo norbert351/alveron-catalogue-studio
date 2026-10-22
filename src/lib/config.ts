@@ -16,6 +16,7 @@ const configSchema = z.object({
   S3_ACCESS_KEY_ID: optionalString,
   S3_SECRET_ACCESS_KEY: optionalString,
   S3_FORCE_PATH_STYLE: z.enum(['true', 'false']).default('false'),
+  LIBRARY_SIGNING_SECRET: optionalString,
 });
 
 export const env = configSchema.parse(process.env);

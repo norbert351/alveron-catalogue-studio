@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getPool } from '@/lib/db';
 import { authenticateToken } from '@/lib/library-token';
+import { signedOriginalUrl as signOriginalUrl } from '@/lib/library-signing';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -70,18 +71,22 @@ export async function GET(request: Request, context: { params: Promise<{ product
     availability: row.availability,
     uploadedAt: row.created_at,
     updatedAt: row.updated_at,
-    images: images.rows.map((image) => ({
-      imageId: image.id,
-      filename: image.original_filename,
-      mediaType: image.media_type,
-      byteSize: Number(image.byte_size),
-      sha256: image.sha256,
-      width: image.width,
-      height: image.height,
-      viewLabel: image.view_label,
-      isCurrent: image.is_current,
-      uploadedAt: image.created_at,
-      originalUrl: `${origin}/api/library/products/${row.id}/images/${image.id}/original`,
-    })),
+    images: images.rows.map((image) => {
+      const signed = signOriginalUrl(origin, row.id, image.id);
+      return {
+        imageId: image.id,
+        filename: image.original_filename,
+        mediaType: image.media_type,
+        byteSize: Number(image.byte_size),
+        sha256: image.sha256,
+        width: image.width,
+        height: image.height,
+        viewLabel: image.view_label,
+        isCurrent: image.is_current,
+        uploadedAt: image.created_at,
+        originalUrl: `${origin}/api/library/products/${row.id}/images/${image.id}/original`,
+        ...(signed ? { signedOriginalUrl: signed } : {}),
+      };
+    }),
   }, { headers: { 'Cache-Control': 'no-store' } });
 }

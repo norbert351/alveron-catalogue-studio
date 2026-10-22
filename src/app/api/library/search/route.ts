@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getPool } from '@/lib/db';
 import { authenticateToken } from '@/lib/library-token';
+import { signedOriginalUrl as signOriginalUrl } from '@/lib/library-signing';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -122,33 +123,37 @@ export async function GET(request: Request) {
     limit,
     offset,
     hasMore: offset + rows.rows.length < Number(total.rows[0]?.count ?? 0),
-    products: rows.rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      sku: row.sku,
-      category: row.category,
-      colour: row.colour,
-      pattern: row.pattern,
-      fabric: row.fabric,
-      fit: row.fit,
-      notes: row.notes,
-      tags: row.tags ?? [],
-      uploadedAt: row.created_at,
-      imageCount: Number(row.image_count),
-      // The first current image, with the stable id needed to fetch its bytes.
-      primaryImage: row.image_id ? {
-        imageId: row.image_id,
-        filename: row.original_filename,
-        mediaType: row.media_type,
-        byteSize: Number(row.byte_size),
-        sha256: row.sha256,
-        width: row.width,
-        height: row.height,
-        viewLabel: row.view_label,
-        originalUrl: `${origin}/api/library/products/${row.id}/images/${row.image_id}/original`,
-        metadataUrl: `${origin}/api/library/products/${row.id}`,
-      } : null,
-    })),
+    products: rows.rows.map((row) => {
+      const signed = row.image_id ? signOriginalUrl(origin, row.id, row.image_id) : null;
+      return {
+        id: row.id,
+        name: row.name,
+        sku: row.sku,
+        category: row.category,
+        colour: row.colour,
+        pattern: row.pattern,
+        fabric: row.fabric,
+        fit: row.fit,
+        notes: row.notes,
+        tags: row.tags ?? [],
+        uploadedAt: row.created_at,
+        imageCount: Number(row.image_count),
+        // The first current image, with the stable id needed to fetch its bytes.
+        primaryImage: row.image_id ? {
+          imageId: row.image_id,
+          filename: row.original_filename,
+          mediaType: row.media_type,
+          byteSize: Number(row.byte_size),
+          sha256: row.sha256,
+          width: row.width,
+          height: row.height,
+          viewLabel: row.view_label,
+          originalUrl: `${origin}/api/library/products/${row.id}/images/${row.image_id}/original`,
+          ...(signed ? { signedOriginalUrl: signed } : {}),
+          metadataUrl: `${origin}/api/library/products/${row.id}`,
+        } : null,
+      };
+    }),
     // Explicit so a calling model does not treat an empty result as "no products
     // exist anywhere" or invent one to fill the gap.
     note: rows.rows.length === 0
