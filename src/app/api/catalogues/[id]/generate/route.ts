@@ -5,10 +5,12 @@ import { getCurrentUser, isSameOrigin } from '@/lib/auth';
 import { env } from '@/lib/config';
 import { getPool } from '@/lib/db';
 import { hasStudioAccess } from '@/lib/security-rules';
-import { getImageGenerationProvider } from '@/lib/generation/provider';
+import { getImageGenerationProvider, providerAvailability } from '@/lib/generation/provider';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+/** The provider can take up to the configured poll budget; allow for it. */
+export const maxDuration = 300;
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
@@ -45,7 +47,31 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     await client.query("UPDATE catalogues SET status=$2,updated_at=now() WHERE id=$1", [id, configured ? 'queued' : 'draft']);
     await client.query('INSERT INTO audit_events(actor_id,action,entity_type,entity_id,detail) VALUES($1,$2,$3,$4,$5)', [user.id, configured ? 'generation.queued' : 'generation.blocked', 'catalogue', id, JSON.stringify({ jobId: job.rows[0].id, provider: provider?.id ?? 'none' })]);
     await client.query('COMMIT');
-    return NextResponse.json({ jobId: job.rows[0].id, status: job.rows[0].status, errorCode: job.rows[0].error_code, provider: provider?.id ?? env.IMAGE_GENERATION_PROVIDER }, { status: configured ? 202 : 503 });
+
+    // Run the worker immediately so the owner sees a real result instead of a
+    // job that sits in the queue until someone runs a separate process.
+    // A failure here is NOT a generation failure: the job is already durable and
+    // a later tick (or the worker process) will pick it up.
+    let outcome: { outcome: string; assetId?: string; errorCode?: string; errorMessage?: string } | null = null;
+    if (configured) {
+      try {
+        const { runGenerationTick } = await import('@/lib/generation/worker');
+        const tick = await runGenerationTick(`route-${user.id.slice(0, 8)}`);
+        const mine = tick.processed.find((entry) => entry.jobId === job.rows[0].id);
+        outcome = mine ? { outcome: mine.outcome, assetId: mine.assetId, errorCode: mine.errorCode, errorMessage: mine.errorMessage } : null;
+      } catch (error) {
+        outcome = { outcome: 'queued', errorMessage: `Queued, but the inline worker could not run: ${(error as Error).message.slice(0, 200)}` };
+      }
+    }
+
+    return NextResponse.json({
+      jobId: job.rows[0].id,
+      status: job.rows[0].status,
+      errorCode: job.rows[0].error_code,
+      provider: provider?.id ?? env.IMAGE_GENERATION_PROVIDER,
+      model: provider?.model ?? null,
+      outcome,
+    }, { status: configured ? 202 : 503 });
   } catch {
     await client.query('ROLLBACK').catch(() => undefined);
     return NextResponse.json({ error: 'Generation job could not be recorded. Check database readiness and retry safely.' }, { status: 503 });
