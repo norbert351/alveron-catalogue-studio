@@ -3,8 +3,10 @@
 Target: `library.alveronfashion.com` → nginx (TLS) → `127.0.0.1:3001` (Next.js)
 → PostgreSQL `127.0.0.1:55432` and MinIO `127.0.0.1:9000`.
 
-Nothing binds a public interface except nginx on 80/443 (the existing firewall
-already allows those). MinIO, PostgreSQL and the app listen on loopback only.
+nginx listens on public 80/443 (the existing firewall already allows those).
+The pre-existing `alveron-web` (`*:3000`) and `alveron-api` (`*:4000`) also bind
+public interfaces; this project does not change them. MinIO, PostgreSQL and the
+library app listen on loopback only.
 
 ## Deployment status (2026-10-22)
 
@@ -25,15 +27,18 @@ Recorded verification against this deployment:
 
 | Check | Result |
 |---|---|
-| `npm test` | 37/37 |
+| `npm test` | 52/52 (includes 15 mocked vision-bridge tests) |
 | `npm run test:library` (local-storage suite) | 17/17 |
 | `npm run test:library:prod` (real MinIO; restarts app and MinIO) | 18/18 |
 | `npm run test:mcp:prod` (stdio MCP returns real image bytes) | 5/5 |
 | `./deploy/backup.sh` + restore into a scratch database | dump checksum valid; 7 migrations restored |
 | Anonymous MinIO list/get | `403` |
 | Token or signed-URL leakage in PM2 logs | none found |
+| Vision bridge live marker test | **not run** — requires `OPENAI_API_KEY`, a confirmed image-input model and explicit approval |
 
-Not yet run: an actual ChatGPT round-trip. It needs public HTTPS plus the
+Not yet run: the live vision marker test (see `docs/VISION_BRIDGE.md`) and an
+actual ChatGPT round-trip. The marker test needs an OpenAI key, billing and
+approval. The ChatGPT round-trip needs public HTTPS plus the
 ChatGPT-side setup in `docs/LIBRARY.md`. Hosted ChatGPT connectors authenticate
 with OAuth 2.1 and cannot present the `alv_lib_…` bearer; GPT Actions can use
 the bearer but are text-only (no images).
@@ -131,13 +136,24 @@ use the MinIO S3 endpoint.
 
 ## 5. HTTPS (requires your sudo password — not run by the agent)
 
-This is the only remaining step. Run it from `/var/www/alveron-library`:
+This is the only remaining step. An administrator must run it; the `deploy`
+account has no passwordless sudo. Run it from `/var/www/alveron-library` and
+**stop immediately if any `nginx -t` fails**. Do not install the final TLS vhost
+before the certificate exists: it references
+`/etc/letsencrypt/live/library.alveronfashion.com/`.
 
 ```bash
 cd /var/www/alveron-library
+sudo nginx -t
+sudo nginx -T > /tmp/alveron-nginx-before-$(date -u +%Y%m%dT%H%M%SZ).txt
+sudo ss -lntp | grep -E ':(80|443|3001|55432|9000|9001)\b'
+sudo certbot certificates
+sudo ufw status numbered
+sudo cp -a /etc/nginx /root/nginx-backup-$(date -u +%Y%m%dT%H%M%SZ)
+
 sudo cp deploy/nginx/limits.conf /etc/nginx/conf.d/alveron-library-limits.conf
 sudo cp deploy/nginx/alveron-library.bootstrap.conf /etc/nginx/sites-available/alveron-library
-sudo ln -sf ../sites-available/alveron-library /etc/nginx/sites-enabled/alveron-library
+sudo ln -sfn ../sites-available/alveron-library /etc/nginx/sites-enabled/alveron-library
 sudo nginx -t && sudo systemctl reload nginx
 
 sudo certbot certonly --nginx -d library.alveronfashion.com
@@ -147,9 +163,23 @@ sudo nginx -t && sudo systemctl reload nginx
 sudo certbot renew --dry-run
 ```
 
+Use `certbot --nginx`, not `--webroot`: the final vhost redirects every HTTP
+path and has no ACME challenge location, and the existing renewals already use
+the nginx authenticator. If `certbot` cannot complete the HTTP-01 challenge,
+stop and inspect the output rather than weakening the redirect.
+
 Verify: `curl -I http://library.alveronfashion.com` returns `301` to HTTPS;
 `curl -I https://library.alveronfashion.com/login` returns `200` with a valid
-certificate; `openssl s_client` negotiates TLS 1.2 or better.
+certificate; `openssl s_client` negotiates TLS 1.2 or better. Then, with owner
+credentials loaded without echoing them, run the production suites:
+
+```bash
+ALVERON_E2E_BASE=https://library.alveronfashion.com npm run test:library:prod
+ALVERON_E2E_BASE=https://library.alveronfashion.com npm run test:mcp:prod
+```
+
+Those suites create and delete temporary products/tokens, and restart the app
+and MinIO by default.
 
 ## 6. Backups
 

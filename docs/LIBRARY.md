@@ -1,8 +1,9 @@
 # Alveron Product Library — how to use it
 
 This is a private, persistent library for Alveron Fashion product photographs. It
-stores the real uploaded images and lets ChatGPT retrieve them for styling ideas.
-It does not generate images, build outfits or compose catalogues.
+stores the real uploaded images and lets trusted clients and a private
+server-side vision bridge retrieve exact originals. It does not generate images,
+build outfits or compose catalogues.
 
 ## 1. Run it locally
 
@@ -125,6 +126,20 @@ Because ChatGPT cannot supply the bearer token to an MCP connector, the bridge i
 for local/trusted MCP clients (Claude Desktop, Codex, IDE agents) and for an
 API-side Responses integration — not for a ChatGPT-hosted connector. Do not
 expose it on a public port.
+
+### Private vision bridge (actual image bytes)
+
+`scripts/vision-bridge.mjs` resolves a product/image id through this API,
+downloads the original, verifies size, media type and SHA-256, then sends the
+verified bytes as base64 image input to a configurable OpenAI Responses API
+model. It is a server-side CLI only; it opens no port and adds no public endpoint.
+The read-only library token is never sent to OpenAI. See
+`docs/VISION_BRIDGE.md`.
+
+This does **not** make the current ChatGPT conversation able to see library
+images. A ChatGPT wrapper could only receive the bridge's text analysis. True
+image input requires an API-side integration with a vision model, verified in
+that environment.
 
 ### Minimal OpenAPI for the ChatGPT connector
 

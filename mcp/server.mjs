@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createHash } from 'node:crypto';
+import { createLibraryClient, DEFAULT_LIBRARY_BASE_URL, DEFAULT_LIBRARY_MAX_IMAGE_BYTES, DEFAULT_LIBRARY_TIMEOUT_MS } from './library-client.mjs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -12,45 +12,36 @@ import { z } from 'zod';
  * to logs. The bridge calls the existing read-only HTTP API instead of
  * re-implementing database or storage logic.
  *
- * Transport: stdio. ChatGPT's hosted connectors require OAuth 2.1 and cannot
- * present a custom API key, so this server is for local/trusted MCP clients
- * (and for an API-side Responses integration). See README.md.
+ * Transport: stdio. ChatGPT's hosted connectors do not accept this custom
+ * bearer token, so this server is for local/trusted MCP clients (and for an
+ * API-side Responses integration). See README.md.
  */
 
-const BASE = (process.env.ALVERON_LIBRARY_BASE_URL ?? 'https://library.alveronfashion.com').replace(/\/+$/, '');
+const BASE = (process.env.ALVERON_LIBRARY_BASE_URL ?? DEFAULT_LIBRARY_BASE_URL).replace(/\/+$/, '');
 const TOKEN = (process.env.ALVERON_LIBRARY_TOKEN ?? '').trim();
-const TIMEOUT_MS = 45_000;
-const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
-const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const TIMEOUT_MS = Number(process.env.ALVERON_LIBRARY_TIMEOUT_MS ?? DEFAULT_LIBRARY_TIMEOUT_MS);
+const MAX_IMAGE_BYTES = Number(process.env.ALVERON_MAX_IMAGE_BYTES ?? DEFAULT_LIBRARY_MAX_IMAGE_BYTES);
 
 if (!TOKEN.startsWith('alv_lib_')) {
   process.stderr.write('ALVERON_LIBRARY_TOKEN is missing or not a library token (alv_lib_...). Create one in Alveron Studio -> Settings -> Tokens.\n');
   process.exit(1);
 }
 
-function redact(value) {
-  return TOKEN ? String(value).split(TOKEN).join('[redacted]') : String(value);
+let library;
+try {
+  library = createLibraryClient({
+    baseUrl: BASE,
+    token: TOKEN,
+    timeoutMs: TIMEOUT_MS,
+    maxImageBytes: MAX_IMAGE_BYTES,
+  });
+} catch (error) {
+  process.stderr.write(`${error?.message ?? error}\n`);
+  process.exit(1);
 }
 
-async function call(path) {
-  let response;
-  try {
-    response = await fetch(`${BASE}${path}`, {
-      headers: { Authorization: `Bearer ${TOKEN}`, Accept: 'application/json' },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-  } catch (error) {
-    throw new Error(`Could not reach the Alveron library at ${BASE}: ${redact(error?.message ?? error)}`, { cause: error });
-  }
-  if (!response.ok) {
-    throw new Error(`Alveron library returned ${response.status} for ${path}: ${redact((await response.text()).slice(0, 400))}`);
-  }
-  return response;
-}
-
-async function getJson(path) {
-  return (await call(path)).json();
-}
+const redact = library.redact;
+const getJson = library.getJson;
 
 function textResult(value) {
   return { content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] };
@@ -120,7 +111,7 @@ server.registerTool(
   },
   async ({ productId }) => {
     try {
-      return textResult(await getJson(`/api/library/products/${encodeURIComponent(productId)}`));
+      return textResult(await library.getProduct(productId));
     } catch (error) {
       return fail(error?.message ?? error);
     }
@@ -140,19 +131,7 @@ server.registerTool(
   },
   async ({ productId, imageId }) => {
     try {
-      const product = await getJson(`/api/library/products/${encodeURIComponent(productId)}`);
-      const image = (product.images ?? []).find((candidate) => candidate.imageId === imageId);
-      if (!image) throw new Error('No such image on that product.');
-      if (!IMAGE_TYPES.has(image.mediaType)) throw new Error(`Unsupported media type: ${image.mediaType}`);
-
-      const response = await call(`/api/library/products/${encodeURIComponent(productId)}/images/${encodeURIComponent(imageId)}/original`);
-      const bytes = Buffer.from(await response.arrayBuffer());
-
-      if (bytes.length !== image.byteSize) throw new Error('Original size does not match the stored record.');
-      if (bytes.length > MAX_IMAGE_BYTES) throw new Error('Original is larger than the 20 MB MCP limit.');
-      const digest = createHash('sha256').update(bytes).digest('hex');
-      if (digest !== image.sha256) throw new Error('Original failed its SHA-256 check; refusing to return it.');
-
+      const { product, image, bytes, sha256 } = await library.getVerifiedImage(productId, imageId);
       return {
         content: [
           { type: 'image', data: bytes.toString('base64'), mimeType: image.mediaType },
@@ -164,11 +143,11 @@ server.registerTool(
               imageId: image.imageId,
               filename: image.filename,
               mediaType: image.mediaType,
-              byteSize: image.byteSize,
+              byteSize: bytes.length,
               width: image.width,
               height: image.height,
               viewLabel: image.viewLabel,
-              sha256: image.sha256,
+              sha256,
               verified: true,
             }, null, 2),
           },
