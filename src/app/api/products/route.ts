@@ -6,6 +6,7 @@ import { hasStudioAccess } from '@/lib/security-rules';
 import { getPool } from '@/lib/db';
 import { listProducts, listProductsPaged } from '@/lib/products';
 import { productInputSchema } from '@/lib/product-rules';
+import { UPLOADS_PER_HOUR } from '@/lib/upload-limits';
 import { MAX_PRODUCT_IMAGES, validateImage } from '@/lib/image-validation';
 import { getPrivateStorage } from '@/lib/storage';
 import { configuredStorageProvider } from '@/lib/storage';
@@ -109,7 +110,7 @@ export async function POST(request: Request) {
   }
   const provider = configuredStorageProvider();
   const rate = await pool.query("SELECT count(*)::int AS count FROM product_upload_requests WHERE user_id=$1 AND created_at>now()-interval '1 hour'", [user.id]).catch(() => null);
-  if (rate && rate.rows[0].count >= 20) { client.release(); return NextResponse.json({ error: 'Upload limit reached. Try again later.' }, { status: 429 }); }
+  if (rate && rate.rows[0].count >= UPLOADS_PER_HOUR) { client.release(); return NextResponse.json({ error: 'Upload limit reached. Try again later.' }, { status: 429 }); }
   const objectKeys = validated.map((entry) => `products/${productId}/${randomUUID()}.${entry.image.extension}`);
   const requestSha = createHash('sha256').update(JSON.stringify({ product: parsed.data, views: viewLabels, images: validated.map(({ image }) => createHash('sha256').update(image.bytes).digest('hex')) })).digest('hex');
   try {

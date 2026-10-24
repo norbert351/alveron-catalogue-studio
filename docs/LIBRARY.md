@@ -74,21 +74,35 @@ Use a **Custom GPT Action**, not a connector:
   cannot be used by a hosted connector.
 - GPT Actions are the only ChatGPT surface that accepts a static bearer token:
   **Authentication → API Key → Bearer**, value `alv_lib_…`.
-- GPT Actions are **text-only** — they cannot receive image or video bytes and
-  cannot render an image. Ask the model for the product metadata and the
-  `signedOriginalUrl`/`originalUrl`, then open that link yourself to see the
-  exact original. True image content in a model requires the MCP bridge below.
+- Import the live schema at
+  **`https://library.alveronfashion.com/api/library/openapi.json`**.
+  It documents only the three operations needed here: list every original,
+  search products, and retrieve one original image.
+- The list/search actions return an `originalUrl` that is already signed and
+  short-lived. Opening it returns the exact original photo; no bearer header is
+  needed for that URL. Signed links expire after 10 minutes.
 
-Point the Action at the four endpoints below. A minimal OpenAPI description follows.
+Setup: **ChatGPT → GPT → Configure → Actions → Add actions → Import from URL**,
+paste the schema URL, then set **Authentication → API Key → Bearer** and paste
+the `alv_lib_…` token. The schema itself is public because it contains no product
+data or credentials. Use `listProductImages` to browse the whole catalogue,
+`searchProducts` to find a garment by name or id, and `getOriginalImage` to open
+its original image.
 
 ### The API
 
 | Method | Path | Purpose |
 |---|---|---|
+| GET | `/api/library/images` | **Every original image in the library.** `?limit=` (1–100, default 100), `?offset=`, optional `?productId=` |
 | GET | `/api/library/search` | Search/list products. `?q=`, `?category=`, `?colour=`, `?tag=`, `?ids=`, `?limit=`, `?offset=` |
 | GET | `/api/library/products/{id}` | Full metadata + every image for one product |
 | GET | `/api/library/products/{id}/images/{imageId}/original` | **The exact uploaded bytes** |
 | POST | `/api/library/batch` | `{"ids":[...]}` — several products in one call |
+
+`GET /api/library/images` is the smallest possible visual index: each item has
+only `productId`, `imageId` and a short-lived `originalUrl`. It returns
+pagination fields (`total`, `limit`, `offset`, `hasMore`, `nextOffset`) and
+nothing else. Pass `productId` to list just one product's photos.
 
 Every response includes, per image, an `originalUrl` plus `sha256`, `width`,
 `height`, `mediaType` and `viewLabel`, so a styling request can tell colour
@@ -141,55 +155,26 @@ images. A ChatGPT wrapper could only receive the bridge's text analysis. True
 image input requires an API-side integration with a vision model, verified in
 that environment.
 
-### Minimal OpenAPI for the ChatGPT connector
+### OpenAPI schema for ChatGPT GPT Actions
 
-```yaml
-openapi: 3.1.0
-info: { title: Alveron Product Library, version: "1.0" }
-servers: [{ url: "https://YOUR-PUBLIC-HOST" }]
-security: [{ bearerAuth: [] }]
-components:
-  securitySchemes:
-    bearerAuth: { type: http, scheme: bearer }
-paths:
-  /api/library/search:
-    get:
-      operationId: searchProducts
-      summary: Search the Alveron product library
-      parameters:
-        - { name: q, in: query, schema: { type: string }, description: "name, colour, tag, filename or product id" }
-        - { name: category, in: query, schema: { type: string } }
-        - { name: colour, in: query, schema: { type: string } }
-        - { name: limit, in: query, schema: { type: integer, default: 24, maximum: 100 } }
-        - { name: offset, in: query, schema: { type: integer, default: 0 } }
-      responses: { "200": { description: Matching products with originalUrl links } }
-  /api/library/products/{productId}:
-    get:
-      operationId: getProduct
-      summary: Full metadata and images for one product
-      parameters: [{ name: productId, in: path, required: true, schema: { type: string } }]
-      responses: { "200": { description: Product with all images } }
-  /api/library/products/{productId}/images/{imageId}/original:
-    get:
-      operationId: getOriginalImage
-      summary: Download the exact original uploaded image
-      parameters:
-        - { name: productId, in: path, required: true, schema: { type: string } }
-        - { name: imageId, in: path, required: true, schema: { type: string } }
-      responses: { "200": { description: The original image bytes } }
-  /api/library/batch:
-    post:
-      operationId: getProducts
-      summary: Resolve several products in one call
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties: { ids: { type: array, items: { type: string }, maxItems: 50 } }
-      responses: { "200": { description: Products plus a list of any missing ids } }
+The live schema is served at:
+
 ```
+https://library.alveronfashion.com/api/library/openapi.json
+```
+
+It is a valid OpenAPI 3.1 document with exactly three operations:
+
+| operationId | Path | Purpose |
+|---|---|---|
+| `listProductImages` | `GET /api/library/images` | Paginate every product image; returns product id, image id and signed original URL |
+| `searchProducts` | `GET /api/library/search` | Find products by existing name/id and get their original image URL |
+| `getOriginalImage` | `GET /api/library/products/{productId}/images/{imageId}/original` | Open the exact original bytes |
+
+The schema is public because it contains no product data or credentials. The
+API operations require `Authorization: Bearer alv_lib_…`; the signed image URLs
+returned by list/search do not. The schema is generated from the request origin,
+so a different deployment automatically advertises its own host.
 
 ## 5. Security model
 
@@ -198,10 +183,12 @@ paths:
 | All app pages and product APIs | Owner login (bcrypt + HMAC session cookie) |
 | Upload / edit / delete | Owner login **and** same-origin check |
 | `/api/library/*` | Read-only bearer token, scope `library:read` |
+| `/api/library/openapi.json` | Public schema only — no product data or credentials |
 | `/api/status` | Public but exposes only up/down — no counts or data |
-| Original files | Never public; served only through authenticated routes |
+| Original files | Never public; served with a bearer token or a short-lived signed URL |
 
-No permanent public image URLs exist. No credential is ever sent to the browser.
+No permanent public image URLs exist. Signed URLs expire after 10 minutes and are
+bound to one product/image pair. No credential is ever sent to the browser.
 
 ## 6. What is verified and what is not
 

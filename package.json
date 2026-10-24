@@ -19,10 +19,12 @@
     "storage:root": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/check-storage-root.mts",
     "test:library": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/e2e-library.mjs",
     "test:library:prod": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/e2e-library-prod.mjs",
+    "test:library:images": "node --env-file-if-exists=.env.local scripts/e2e-library-images.mjs",
     "test:mcp:prod": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/e2e-mcp-prod.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1153.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "bcryptjs": "3.0.3",
     "file-type": "22.2.0",
     "lucide-react": "1.59.0",

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { getCurrentUser, isSameOrigin } from '@/lib/auth';
 import { getPool } from '@/lib/db';
 import { MAX_PRODUCT_IMAGES, validateImage } from '@/lib/image-validation';
+import { UPLOADS_PER_HOUR } from '@/lib/upload-limits';
 import { hasStudioAccess } from '@/lib/security-rules';
 import { configuredStorageProvider, getPrivateStorage } from '@/lib/storage';
 import { bumpInventoryRevision } from '@/lib/inventory';
@@ -51,7 +52,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const requestSha = createHash('sha256').update(JSON.stringify({ productId, views, replaces, images: validated.map(({ image }) => createHash('sha256').update(image.bytes).digest('hex')) })).digest('hex');
   const pool = getPool();
   const rate = await pool.query("SELECT count(*)::int AS count FROM product_upload_requests WHERE user_id=$1 AND created_at>now()-interval '1 hour'", [user.id]).catch(() => null);
-  if (rate && rate.rows[0].count >= 20) return NextResponse.json({ error: 'Upload limit reached. Try again later.' }, { status: 429 });
+  if (rate && rate.rows[0].count >= UPLOADS_PER_HOUR) return NextResponse.json({ error: 'Upload limit reached. Try again later.' }, { status: 429 });
   const reservation = await pool.query(`INSERT INTO product_upload_requests (user_id,idempotency_key,request_sha256,product_id,status,object_keys)
     VALUES ($1,$2,$3,$4,'receiving',$5) ON CONFLICT (user_id,idempotency_key) DO NOTHING RETURNING id`, [user.id, requestId, requestSha, productId, JSON.stringify(keys)]);
   if (!reservation.rowCount) {
